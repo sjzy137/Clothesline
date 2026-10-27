@@ -21,7 +21,10 @@ struct GrabArea: NSViewRepresentable {
         view.canDrag = { line.validateAvailable(id) }
         view.dragImage = item.thumb
         view.dragText = item.noteText
-        view.onClick = { line.quickLook(id) }
+        view.onClick = {
+            if item.file.isDirectory { line.open(id) }
+            else { line.quickLook(id) }
+        }
         view.onDoubleClick = { if item.noteText != nil { line.requestEditNote(id) } else { line.open(id) } }
         view.onDismiss = { line.dismiss(id) }
         view.onPressChange = {
