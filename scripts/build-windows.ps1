@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 Set-Location (Split-Path $PSScriptRoot)
 function Run-DotNet([string[]]$Arguments) {
     & dotnet @Arguments

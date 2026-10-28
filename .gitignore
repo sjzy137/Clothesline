@@ -4,3 +4,7 @@ build/
 *.log
 windows/**/bin/
 windows/**/obj/
+_publish/
+# The installer is a 60 MB binary. Committing one per change would bloat the history for good,
+# so build output stays out of the tree and goes to a GitHub Release instead.
+dist/

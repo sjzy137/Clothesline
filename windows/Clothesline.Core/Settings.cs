@@ -10,19 +10,52 @@ public sealed class Settings
     public List<FileRecord> PinSnapshots { get; set; } = [];
     public Dictionary<string, string> Dismissed { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public bool AlwaysVisible { get; set; }
-    public bool ClipboardImages { get; set; }
-    public bool ClipboardText { get; set; }
+    // On by default: screenshots and copied images land on the line without opting in.
+    public bool ClipboardImages { get; set; } = true;
+    public bool ClipboardText { get; set; } = true;
     public bool English { get; set; } = !System.Globalization.CultureInfo.CurrentUICulture.Name.StartsWith("zh");
     public int Capacity { get; set; } = 8;
+    /// Empty means "auto": pick the best installed OCR language. Otherwise an exact language tag.
+    public string OcrLanguage { get; set; } = "";
+    /// Which recogniser backs "extract text": "windows" for the built-in one, "v6" for PP-OCRv6.
+    /// PP-OCRv6 is the default because its tiny tier ships with the app and needs no download, and
+    /// it measured clearly better on the same sample.
+    public string OcrEngine { get; set; } = "v6";
+    /// PP-OCRv6 tier: "tiny", "small" or "medium". Only read when OcrEngine is "v6".
+    public string OcrModel { get; set; } = "tiny";
+
+    // Every optional interaction is switchable, so a behaviour that gets in someone's way can be
+    // turned off from the settings window instead of having to be lived with.
+    /// Hide the rope while the foreground window covers the whole monitor, e.g. a full-screen video.
+    public bool HideFullScreen { get; set; } = true;
+    /// Ctrl+Alt+Up toggles the rope. Turning it off releases the combination to other software.
+    public bool HotKeyEnabled { get; set; } = true;
+    /// A single click on a card copies it: an image as a bitmap, a note as text, anything else as a
+    /// file. Turning this off leaves the click doing nothing, so a stray click cannot overwrite the
+    /// clipboard.
+    public bool ClickToCopy { get; set; } = true;
+    /// Ctrl held while dragging a card out makes the drop a move rather than a copy.
+    public bool CtrlDragMoves { get; set; } = true;
+    /// The pin and take-down buttons drawn on the card.
+    public bool CardButtons { get; set; } = true;
+    /// Dropping files onto the rope hangs them.
+    public bool DropToHang { get; set; } = true;
+    /// How long the rope stays out after the pointer leaves, in milliseconds.
+    public int RevealDelay { get; set; } = 1800;
     public static Settings Load(string path)
     {
         if (!File.Exists(path)) return new();
+        var text = File.ReadAllText(path);
         try
         {
-            var value = JsonSerializer.Deserialize<Settings>(File.ReadAllText(path)) ?? throw new JsonException();
+            var value = JsonSerializer.Deserialize<Settings>(text) ?? throw new JsonException();
             if (value.Folders is null || value.Attached is null || value.Recent is null || value.Pins is null || value.PinSnapshots is null || value.Dismissed is null) throw new JsonException();
             value.Dismissed = new(value.Dismissed, StringComparer.OrdinalIgnoreCase);
             value.Capacity = Math.Clamp(value.Capacity, 3, 50);
+            // A file written before PP-OCRv6 existed carries no engine choice, and the fresh default
+            // cannot tell it apart from someone having deliberately picked the Windows engine. Those
+            // files are upgraded to the more accurate engine; an explicit choice is left alone.
+            if (!JsonDocument.Parse(text).RootElement.TryGetProperty(nameof(OcrEngine), out _)) value.OcrEngine = "v6";
             return value;
         }
         catch (JsonException)

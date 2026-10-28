@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -67,6 +68,123 @@ internal static class Native
         try { var bitmap = Imaging.CreateBitmapSourceFromHIcon(shell.Icon, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions()); bitmap.Freeze(); return bitmap; }
         finally { if (shell.Icon != IntPtr.Zero) DestroyIcon(shell.Icon); }
     }
+    // ---- Global hot key ------------------------------------------------------
+    public const int HotKeyMessage = 0x0312;
+    public const uint ModifierAlt = 0x0001, ModifierControl = 0x0002, ModifierShift = 0x0004, ModifierWindows = 0x0008;
+    public const uint VirtualKeyUp = 0x26;
+    [DllImport("user32.dll", SetLastError = true)] public static extern bool RegisterHotKey(IntPtr window, int id, uint modifiers, uint key);
+    [DllImport("user32.dll", SetLastError = true)] public static extern bool UnregisterHotKey(IntPtr window, int id);
+
+    // ---- Full-screen detection -----------------------------------------------
+    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr window, out WindowRectangle rectangle);
+    [DllImport("user32.dll")] private static extern IntPtr MonitorFromWindow(IntPtr window, uint policy);
+    [DllImport("user32.dll", EntryPoint = "GetMonitorInfoW")] private static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInformation info);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr window, StringBuilder name, int capacity);
+    [StructLayout(LayoutKind.Sequential)] private struct WindowRectangle { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] private struct MonitorInformation
+    {
+        public int Size; public WindowRectangle Monitor; public WindowRectangle Work; public uint Flags;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string Device;
+    }
+    /// A foreground window that covers the whole monitor means something is playing or gaming full screen.
+    /// Maximised windows stop at the taskbar and therefore do not match.
+    public static bool ForegroundCoversMonitor()
+    {
+        var window = GetForegroundWindow();
+        if (window == IntPtr.Zero) return false;
+        var name = new StringBuilder(256);
+        var className = GetClassName(window, name, 256) > 0 ? name.ToString() : "";
+        // The desktop and the taskbar are not full-screen applications.
+        if (className is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd") return false;
+        if (!GetWindowRect(window, out var bounds)) return false;
+        if (bounds.Right - bounds.Left <= 0 || bounds.Bottom - bounds.Top <= 0) return false;
+        var monitor = MonitorFromWindow(window, 2); // MONITOR_DEFAULTTONEAREST
+        if (monitor == IntPtr.Zero) return false;
+        var info = new MonitorInformation { Size = Marshal.SizeOf<MonitorInformation>() };
+        if (!GetMonitorInfo(monitor, ref info)) return false;
+        return bounds.Left <= info.Monitor.Left && bounds.Top <= info.Monitor.Top &&
+               bounds.Right >= info.Monitor.Right && bounds.Bottom >= info.Monitor.Bottom;
+    }
+
+    // ---- Editing and move semantics ------------------------------------------
+    public static bool Edit(string path)
+    {
+        if (TryVerb(path, "edit")) return true;
+        var paint = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "mspaint.exe");
+        return File.Exists(paint) && TryRun(paint, "\"" + path + "\"");
+    }
+    private static bool TryVerb(string path, string verb)
+    { try { Process.Start(new ProcessStartInfo(path) { UseShellExecute = true, Verb = verb }); return true; } catch { return false; } }
+    private static bool TryRun(string file, string arguments)
+    { try { Process.Start(new ProcessStartInfo(file) { UseShellExecute = true, Arguments = arguments }); return true; } catch { return false; } }
+
+    /// Asks a well behaved drop target to move instead of copy. It must be written as a stream: a
+    /// byte array is marshalled differently and arrives as garbage. Explorer does not act on this
+    /// when the CF_HDROP comes from outside the shell, so a Ctrl+drag still has to be finished by
+    /// the source — see RopeWindow.CompleteMove.
+    public const string PreferredDropEffect = "Preferred DropEffect";
+    public const int DropEffectMove = 2;
+    public static void MarkAsMove(System.Windows.DataObject payload)
+    { payload.SetData(PreferredDropEffect, new MemoryStream(new byte[] { DropEffectMove, 0, 0, 0 })); }
+
+    /// Moves a file or folder to the Recycle Bin rather than deleting it outright. Ctrl+drag needs
+    /// this because the app cannot see where the drop target put its copy, so an unrecoverable
+    /// delete would risk losing the only copy if the target's copy did not in fact land.
+    public static bool Recycle(string path)
+    {
+        // pFrom has to be terminated by two nulls because it can carry several paths.
+        var operation = new ShellFileOperation
+        {
+            Function = FileOperationDelete,
+            From = path + "\0\0",
+            Flags = AllowUndo | NoConfirmation | Silent | NoErrorUi
+        };
+        return SHFileOperation(ref operation) == 0 && !operation.AnyOperationsAborted;
+    }
+
+    private const ushort FileOperationDelete = 3;
+    private const ushort AllowUndo = 0x0040, NoConfirmation = 0x0010, Silent = 0x0004, NoErrorUi = 0x0400;
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct ShellFileOperation
+    {
+        public IntPtr Owner;
+        public ushort Function;
+        [MarshalAs(UnmanagedType.LPWStr)] public string From;
+        [MarshalAs(UnmanagedType.LPWStr)] public string? To;
+        public ushort Flags;
+        [MarshalAs(UnmanagedType.Bool)] public bool AnyOperationsAborted;
+        public IntPtr NameMappings;
+        [MarshalAs(UnmanagedType.LPWStr)] public string? ProgressTitle;
+    }
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    private static extern int SHFileOperation(ref ShellFileOperation operation);
+
+    [DllImport("user32.dll")] private static extern bool OpenClipboard(IntPtr owner);
+    [DllImport("user32.dll")] private static extern bool CloseClipboard();
+    [DllImport("user32.dll")] private static extern IntPtr GetClipboardData(uint format);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern uint RegisterClipboardFormatW(string name);
+    [DllImport("kernel32.dll")] private static extern IntPtr GlobalLock(IntPtr handle);
+    [DllImport("kernel32.dll")] private static extern bool GlobalUnlock(IntPtr handle);
+    [DllImport("kernel32.dll")] private static extern nuint GlobalSize(IntPtr handle);
+    /// Reads the drop effect back so the smoke test can prove a move stays a move. Returns -1 when the
+    /// clipboard is unavailable or the marker is missing.
+    public static int ReadPreferredDropEffect()
+    {
+        if (!OpenClipboard(IntPtr.Zero)) return -1;
+        try
+        {
+            var memory = GetClipboardData(RegisterClipboardFormatW(PreferredDropEffect));
+            if (memory == IntPtr.Zero) return -1;
+            var view = GlobalLock(memory);
+            if (view == IntPtr.Zero) return -1;
+            try { return GlobalSize(memory) < 4 ? -1 : Marshal.ReadInt32(view); }
+            finally { GlobalUnlock(memory); }
+        }
+        finally { CloseClipboard(); }
+    }
+
     private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private static string StartupCommand => "\"" + Environment.ProcessPath + "\"";
     public static bool LaunchAtLogin

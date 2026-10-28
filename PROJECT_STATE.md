@@ -1,7 +1,45 @@
 # Clothesline V0.1 项目状态
 
-更新：2026-10-13（Asia/Shanghai）
-状态：本地候选版；Release 构建、核心与 macOS 集成测试通过，完整 UI 验收待完成。
+更新：2026-10-28（PP-OCRv6 + 真移动 + 设置窗口，分支 feature/windows-interactions；macOS 未改动）
+状态：本地候选版；Release 构建、核心与 macOS 集成测试通过，完整 UI 验收待完成。Windows 侧 Release 编译 0 错 0 警、核心测试与自检 11 项全通过；桌面交互与 OCR 准确率待人工验收。
+
+## 最新一轮新增（2026-10-28，起点同为 45ba96c）
+
+- **PP-OCRv6 文字识别**：`Sdcb.SimdPaddleOCR`（纯托管，无原生依赖）。Tiny 随安装附带首次自动解包；Small/Medium 从 ModelScope 按需下载，落盘前按 PaddlePaddle 公布的 SHA256 校验。字典按档位绑定（Tiny 6,904 标签 / Small·Medium 18,708 标签）。
+- **Ctrl+拖动改为真移动**：资源管理器不执行来自非 Shell 的 CF_HDROP 移动，故拖放成功后由晾衣绳把原文件送回收站（可恢复）再取下卡片。
+- **拖入回归修复**：全屏隐身原把最大化窗口也算作全屏，导致拖放时晾衣绳不展开；展开判定也不再依赖"已展开"。
+- **设置窗口**：常规 / 功能开关 / 监控文件夹 / 剪贴板 / 文字识别五分区。监控文件夹可增删；所有可选行为（拖入挂起、Ctrl+拖动为移动、单击复制、卡片按钮、全屏隐身、Ctrl+Alt+↑ 热键、自动收回延时）均可单独关闭。
+- **右键「取下（删除原文件）」**：二次确认后送回收站，位于「取下（保留原文件）」下方。
+- **资源管理器集成**：经典动词「挂到晾衣绳」+「发送到 → Clothesline」，均已纳入安装程序。
+- **脚本编码修复**：scripts 下的 .ps1 与 .iss 补上 UTF-8 BOM；此前 Windows PowerShell 5.1 按 GBK 解码导致中文脚本无法解析。
+
+## Windows 版本轮状态（2026-10-28，起点 45ba96c）
+
+新增交互（仅 windows/ 目录，Sources/ 未动）：
+- Ctrl+Alt+↑ 热键切换显示方式，注册失败在托盘菜单提示（独立字段，不被每秒扫描覆盖）。
+- 卡片固定按钮（左上）与取下按钮（右上 ×）；按钮是卡片的兄弟节点而非子节点，点击不会误触发拖拽。
+- 单击复制并浮现"已复制"；为不误覆盖剪贴板，单击动作等待系统双击判定窗口后再执行。
+- 按住 Ctrl 拖动写入 CFSTR_PREFERREDDROPEFFECT 请求移动，仅当原文件确实消失才移除卡片。
+- 右键菜单补齐复制图片 / 复制文字 / 用画图编辑 / 另存为；文件夹对不适用项给出明确提示。
+- 自动收回宽限期 1.8 秒；前台窗口铺满整屏（全屏视频/游戏）时自动隐身。
+- 剪贴板挂载默认开启（仅影响新安装）。
+- scripts/windows-context-menu.ps1：HKCU 静态动词方式可选安装资源管理器右键入口，带 -Uninstall。
+
+实测结论（非推断）：WPF DataObject 的 `Preferred DropEffect` 必须以 MemoryStream 写入才会渲染为 HGLOBAL DWORD；byte[] 会变成垃圾值。已固化为自检项 `ctrl-drag move marker`。
+
+## 提取文字（OCR）与安装程序（2026-10-28，接续同一分支）
+
+- TargetFramework 改为 `net10.0-windows10.0.19041.0` 以启用 WinRT 投影，调用 Windows 自带 `Windows.Media.Ocr`：不联网、不上传、不引入第三方依赖。
+- 图片卡片右键「提取文字（OCR）」；结果复制到剪贴板并弹出窗口供核对。托盘菜单运行时列出本机真实可用的识别语言。
+- 汉字之间不加空格、汉字与英文/数字之间保留空格（逐字符边界判断，两侧皆 CJK 才不加）。
+- 超限图片（MaxImageDimension，实测 10000 px）等比缩小后识别；非图片文件由 COMException 统一转成 IOException。
+- 自检新增 OCR 项：渲染已知文字并真正识别，检查汉字未被拆开、统计识别到的汉字数，并验证非图片会被拒绝；无语言包的机器跳过而非失败。
+- 新增 `scripts/windows-installer.iss` 与 `scripts/build-windows-installer.ps1`：Inno Setup 7 产出单文件自包含安装包（54 MB），默认当前用户 Programs 免管理员，管理员运行可整机安装，卸载保留设置。
+
+本轮明确未做：右键「取下（剪切原文件）」与「移动到文件夹…」（用户另有更好的交互设想）。
+
+验证证据：.NET 10.0.403 SDK，Release 编译 0 错误 0 警告；Clothesline.Tests 通过；`Clothesline.exe --self-test` 9 项全通过（real file card、safe dismissal、file-drop payload、WPF overlay construction、card pin and take-down buttons、ctrl-drag move marker、ocr read rendered text (3 Han chars) [zh-Hans-CN] and rejected a non-image、image source lock released、bundled MIT license）。发布产物与已安装产物各自独立跑通全部自检，已安装程序启动后稳定运行。
+待验收：悬浮窗口实际手感、热键是否被其他程序（如英特尔显卡快捷键）占用、全屏隐身、Ctrl 拖动到真实资源管理器的移动结果、OCR 对真实截图与照片的准确率。
 
 ## 架构与功能
 SwiftPM 可执行目标，macOS 14+；AppKit 浮层与菜单栏、SwiftUI 卡片、Quick Look、Carbon 快捷键。DownloadsWatcher 使用 vnode 事件及 2 秒轮询；DownloadIndex 扫描顶层文件与目录，排除隐藏项、符号链接及临时下载名，使用两次稳定样本和 2 秒静默期。

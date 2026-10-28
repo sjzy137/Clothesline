@@ -1,6 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <OutputType>WinExe</OutputType><TargetFramework>net10.0-windows</TargetFramework>
+    <OutputType>WinExe</OutputType>
+    <!-- The explicit Windows SDK version turns on the WinRT projection, which is what
+         Windows.Media.Ocr needs. 19041 (Windows 10 2004) is the oldest version that still
+         exposes everything used here, so the build stays runnable on older systems. -->
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <UseWPF>true</UseWPF><UseWindowsForms>true</UseWindowsForms><EnableWindowsTargeting>true</EnableWindowsTargeting>
     <ImplicitUsings>disable</ImplicitUsings><Nullable>enable</Nullable><LangVersion>12</LangVersion>
     <AssemblyName>Clothesline</AssemblyName><Version>0.1.0</Version><InformationalVersion>0.1.0-windows-rc.1</InformationalVersion>
@@ -8,7 +12,18 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Clothesline.Core/Clothesline.Core.csproj" />
+    <!-- A managed PP-OCRv6 runtime. It carries its own ONNX interpreter and kernels, so the app gets
+         a far better recogniser without dragging in ONNX Runtime, Paddle Inference or OpenCV native
+         binaries, which would break the self-contained single-file publish. -->
+    <PackageReference Include="Sdcb.SimdPaddleOCR" Version="2.0.0" />
+    <!-- The tiny tier ships inside the installer so text extraction works before anything is
+         downloaded. Small and medium are fetched on demand; their label lists are shipped here
+         because those two tiers share a dictionary that is not the tiny one. -->
+    <PackageReference Include="Sdcb.SimdPaddleOCR.Models.ChineseV6Tiny" Version="1.0.0" />
+    <PackageReference Include="Sdcb.SimdPaddleOCR.Models.TextLineOrientation" Version="1.0.0" />
     <Resource Include="../../assets/clothesline-icon.png" Link="icon.png" />
+    <Resource Include="Assets/ppocr-v6-tiny-dict.txt" />
+    <Resource Include="Assets/ppocr-v6-full-dict.txt" />
     <None Include="../../LICENSE" Link="LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
