@@ -31,14 +31,23 @@ internal sealed partial class RopeWindow
         if (IsImage(file.Path))
             menu.Items.Add(Item(T("复制图片","Copy Image"),()=> { CopyToClipboard(file); FlashCard(file.Path,T("已复制","Copied")); }));
         menu.Items.Add(Item(T("复制","Copy"),()=> { CopyToClipboard(file); FlashCard(file.Path,T("已复制","Copied")); }));
+        var noteEntry = clipboardItems.TryGetValue(file.Path, out var ne) ? ne : null;
         if (temporary || IsText(file.Path))
+        {
             menu.Items.Add(Item(T("复制文字","Copy Text"),()=>CopyText(file)));
+            if (noteEntry is not null)
+                menu.Items.Add(Item(T("查看全文","View Full Text"),()=>ShowTextNote(file)));
+        }
         if (IsImage(file.Path))
             menu.Items.Add(AsyncItem(T("提取文字（OCR）","Extract Text (OCR)"),()=>ExtractText(file)));
-        menu.Items.Add(Item(T("编辑…","Edit…"),()=> {
-            Validate(file);
-            if (!Native.Edit(file.Path)) throw new IOException(T("找不到可用的编辑程序。","No editor could be started."));
-        }));
+        var isRtfNote = noteEntry is not null && noteEntry.IsRtf;
+        if (!isRtfNote)
+            menu.Items.Add(Item(T("编辑…","Edit…"),()=> {
+                Validate(file);
+                if (!Native.Edit(file.Path)) throw new IOException(T("找不到可用的编辑程序。","No editor could be started."));
+            }));
+        if (noteEntry is not null)
+            menu.Items.Add(Item(IsFavorite(file.Path) ? T("取消收藏","Unfavorite") : T("收藏到文字信封","Add to Text Envelope"),()=>ToggleFavorite(file.Path)));
         menu.Items.Add(Item(T("另存为…","Save As…"),()=>SaveAs(file)));
         if (!temporary)
         {
@@ -84,7 +93,7 @@ internal sealed partial class RopeWindow
     {
         Validate(file);
         if (file.IsDirectory) throw new IOException(T("文件夹没有可复制的文字。","A folder has no text to copy."));
-        var text = clipboardItems.TryGetValue(file.Path, out var note) && note is not null ? note : File.ReadAllText(file.Path);
+        var text = clipboardItems.TryGetValue(file.Path, out var note) && note is not null ? note.Plain : File.ReadAllText(file.Path);
         if (text.Length > 2000000) throw new IOException(T("文字过长，无法复制到剪贴板。","The text is too long to copy."));
         var data=new DataObject(); data.SetText(text);
         data.SetData(OwnCopy,new MemoryStream(new byte[] { 1 }));
@@ -118,7 +127,7 @@ internal sealed partial class RopeWindow
     {
         var value=Prompt(T("文字便签","Text Note"),text,true); if (value is null) return;
         if (string.IsNullOrWhiteSpace(value) || System.Text.Encoding.UTF8.GetByteCount(value)>200000) throw new IOException(T("便签不能为空，且需在 200 KB 以内。","Note must not be empty or exceed 200 KB."));
-        File.WriteAllText(path,value); clipboardItems[path]=value; signature=""; Render();
+        File.WriteAllText(path,value); clipboardItems[path]=new NoteEntry { Plain=value, IsRtf=false }; signature=""; Render();
     }
     private Forms.ToolStripMenuItem TrayItem(string title,Action action,bool? check=null)
     {
@@ -154,6 +163,7 @@ internal sealed partial class RopeWindow
         clipboard.DropDownItems.Add(TrayItem(T("自动挂上图片 / 截图","Automatically Hang Images / Screenshots"),()=> { settings.ClipboardImages=!settings.ClipboardImages; clipboardSequence=Native.GetClipboardSequenceNumber(); Persist(); },settings.ClipboardImages));
         clipboard.DropDownItems.Add(TrayItem(T("自动挂上文字便签","Automatically Hang Text Notes"),()=> { settings.ClipboardText=!settings.ClipboardText; clipboardSequence=Native.GetClipboardSequenceNumber(); Persist(); },settings.ClipboardText));
         clipboard.DropDownItems.Add(TrayItem(T("清空剪贴板挂载内容","Clear Clipboard Items"),()=>ClearClipboard())); menu.Items.Add(clipboard);
+        menu.Items.Add(TrayItem(T("文字信封…","Text Envelope…"),ShowTextEnvelope));
         var capacity=new Forms.ToolStripMenuItem(T("保留数量","Items to Keep"));
         foreach (var number in new[] { 5,8,12,25,50 }) capacity.DropDownItems.Add(TrayItem(number.ToString(),()=> { settings.Capacity=number; Persist(); },settings.Capacity==number));
         menu.Items.Add(capacity);

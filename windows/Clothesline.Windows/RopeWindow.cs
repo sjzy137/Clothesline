@@ -41,7 +41,7 @@ internal sealed partial class RopeWindow : Window
     private readonly FileIndex index = new();
     private readonly RopeState state = new();
     private readonly Dictionary<string, FileRecord> monitored = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, string?> clipboardItems = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, NoteEntry?> clipboardItems = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> clipboardHashes = new();
     private readonly List<FileSystemWatcher> watchers = [];
     private readonly Canvas surface = new();
@@ -61,7 +61,6 @@ internal sealed partial class RopeWindow : Window
     private DateTime? enteredTopAt;
     private Window? settingsWindow;
     private readonly Dictionary<string, PinWindow> deskWindows = [];
-    private string? clipboardFolder;
     private DispatcherTimer? clickTimer;
     private IntPtr handle;
     private const string OwnCopy = "Clothesline.OwnCopy";
@@ -84,7 +83,7 @@ internal sealed partial class RopeWindow : Window
         PreviewDragOver += (_, e) => { e.Effects = settings.DropToHang && e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None; e.Handled = true; };
         Drop += (_, e) => { if (settings.DropToHang && e.Data.GetData(DataFormats.FileDrop) is string[] paths) Guard(() => Attach(paths)); e.Handled = true; };
         Loaded += (_, _) => Start();
-        Closed += (_, _) => { closing = true; if (handle != IntPtr.Zero) Native.UnregisterHotKey(handle, VisibilityHotKeyId); scanTimer.Stop(); pointerTimer.Stop(); foreach (var watcher in watchers) watcher.Dispose(); foreach (var w in deskWindows.Values) w.Close(); tray?.Dispose(); ClearClipboard(false); Application.Current.Shutdown(); };
+        Closed += (_, _) => { closing = true; if (handle != IntPtr.Zero) Native.UnregisterHotKey(handle, VisibilityHotKeyId); scanTimer.Stop(); pointerTimer.Stop(); foreach (var watcher in watchers) watcher.Dispose(); foreach (var w in deskWindows.Values) w.Close(); tray?.Dispose(); ClearClipboard(false, false); Application.Current.Shutdown(); };
     }
     private void Start()
     {
@@ -98,6 +97,7 @@ internal sealed partial class RopeWindow : Window
         pointerTimer.Tick += (_, _) => PollPointer();
         scanTimer.Start(); pointerTimer.Start(); _ = Scan();
         ReopenDeskPins();
+        LoadNotes();
     }
     private void RegisterHotKey()
     {
@@ -247,7 +247,7 @@ internal sealed partial class RopeWindow : Window
         var missing = FileRecord.Read(file.Path) is null;
         var pinned = state.Pinned.Contains(file.Path);
         if (clipboardItems.TryGetValue(file.Path,out var note) && note is not null)
-            body.Children.Add(new TextBlock { Text=note, TextWrapping=TextWrapping.Wrap, Height=80, Margin=new Thickness(5), Background=new SolidColorBrush(Color.FromRgb(255,248,215)) });
+            body.Children.Add(new TextBlock { Text=note.Plain, TextWrapping=TextWrapping.Wrap, Height=80, Margin=new Thickness(5), Background=new SolidColorBrush(Color.FromRgb(255,248,215)) });
         else body.Children.Add(new Image { Source=Native.Thumbnail(file.Path), Width=106, Height=85, Stretch=Stretch.Uniform });
         body.Children.Add(new TextBlock { Text=note is not null ? T("文字便签","Text Note") : file.Name, TextTrimming=TextTrimming.CharacterEllipsis, FontSize=10, TextAlignment=TextAlignment.Center, Margin=new Thickness(3) });
         if (missing || pinned) body.Children.Add(new TextBlock { Text=missing ? T("文件失效","Unavailable") : T("已固定","Pinned"), FontSize=10, Foreground=missing ? Brushes.Firebrick : Brushes.SlateGray, TextAlignment=TextAlignment.Center });
@@ -442,7 +442,11 @@ internal sealed partial class RopeWindow : Window
         Validate(file);
         var data = new DataObject();
         if (IsImage(file.Path)) data.SetImage(Native.ReadImage(file.Path));
-        else if (clipboardItems.TryGetValue(file.Path, out var text) && text is not null) data.SetText(text);
+        else if (clipboardItems.TryGetValue(file.Path, out var text) && text is not null)
+        {
+            data.SetText(text.Plain);
+            if (text.IsRtf && File.Exists(file.Path)) data.SetData(DataFormats.Rtf, File.ReadAllText(file.Path));
+        }
         else data.SetFileDropList(new StringCollection { file.Path });
         // Stops the clipboard monitor from hanging the app's own copy straight back on the line.
         data.SetData(OwnCopy, new MemoryStream(new byte[] { 1 }));
@@ -472,7 +476,7 @@ internal sealed partial class RopeWindow : Window
     private void Validate(FileRecord file)
     { if (FileRecord.Read(file.Path) is null) throw new IOException(T("源文件不存在或无法访问。","The original file is missing or inaccessible.")); }
     private void Open(FileRecord file)
-    { Validate(file); if (clipboardItems.TryGetValue(file.Path,out var note) && note is not null) EditNote(file.Path,note); else Native.Open(file.Path); }
+    { Validate(file); if (clipboardItems.TryGetValue(file.Path,out var note) && note is not null) ShowTextNote(file); else Native.Open(file.Path); }
     private void Guard(Action action) { try { action(); } catch (Exception e) { MessageBox.Show(e.Message,"Clothesline"); } }
     private void PollPointer()
     {
@@ -508,11 +512,15 @@ internal sealed partial class RopeWindow : Window
         // while a drag is in flight so a file can land on empty rope as well.
         Native.ClickThrough(this, !reveal || !(overCard || dragging));
     }
-    private void ClearClipboard(bool refresh=true)
+    private void ClearClipboard(bool refresh=true, bool deleteFiles=true)
     {
-        foreach (var path in clipboardItems.Keys) { state.Dismissed.Remove(path); state.Pinned.Remove(path); }
+        foreach (var path in clipboardItems.Keys)
+        {
+            state.Dismissed.Remove(path); state.Pinned.Remove(path);
+            // Favourited notes are kept on disk; only un-favourited ones are removed.
+            if (deleteFiles && !IsFavorite(path)) { try { if (File.Exists(path)) File.Delete(path); } catch { } }
+        }
         clipboardItems.Clear(); clipboardHashes.Clear();
-        if (clipboardFolder is not null) { try { Directory.Delete(clipboardFolder,true); } catch { } clipboardFolder=null; }
         if (refresh) { signature=""; Persist(); Render(); }
     }
     private void PollClipboard()
@@ -522,7 +530,7 @@ internal sealed partial class RopeWindow : Window
         try
         {
             if (Clipboard.ContainsData(OwnCopy) || Clipboard.ContainsFileDropList()) { clipboardSequence=sequence; return; }
-            byte[]? bytes=null; string? note=null; string extension=".png";
+            byte[]? bytes=null; string? plain=null; string? rtf=null; string extension=".png";
             if (settings.ClipboardImages && Clipboard.ContainsImage())
             {
                 var bitmap=Clipboard.GetImage(); if (bitmap is null || (long)bitmap.PixelWidth*bitmap.PixelHeight>32000000) { clipboardSequence=sequence; return; }
@@ -531,18 +539,25 @@ internal sealed partial class RopeWindow : Window
                 if (bytes.Length>32000000) { clipboardSequence=sequence; return; }
             }
             else if (settings.ClipboardText && !Clipboard.ContainsImage() && Clipboard.ContainsText())
-            { note=Clipboard.GetText(); bytes=Encoding.UTF8.GetBytes(note); extension=".txt"; if (string.IsNullOrWhiteSpace(note) || bytes.Length>200000) { clipboardSequence=sequence; return; } }
+            {
+                plain=Clipboard.GetText();
+                if (Clipboard.GetData(DataFormats.Rtf) is string rtfRaw && !string.IsNullOrWhiteSpace(rtfRaw)) rtf=rtfRaw;
+                extension=rtf is not null ? ".rtf" : ".txt";
+                bytes=Encoding.UTF8.GetBytes(plain);
+                if (string.IsNullOrWhiteSpace(plain) || bytes.Length>200000) { clipboardSequence=sequence; return; }
+            }
             if (bytes is null) { clipboardSequence=sequence; return; }
             var hash=extension+Convert.ToHexString(SHA256.HashData(bytes));
             if (clipboardHashes.Contains(hash) || clipboardItems.Count>=100) { clipboardSequence=sequence; return; }
-            clipboardFolder ??= System.IO.Path.Combine(System.IO.Path.GetTempPath(),"Clothesline-Clipboard-"+Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(clipboardFolder);
+            var notesDir=NotesDir; Directory.CreateDirectory(notesDir);
             var security=new DirectorySecurity(); security.SetAccessRuleProtection(true,false);
             var owner=WindowsIdentity.GetCurrent().User!; security.SetOwner(owner);
             security.AddAccessRule(new FileSystemAccessRule(owner,FileSystemRights.FullControl,InheritanceFlags.ContainerInherit|InheritanceFlags.ObjectInherit,PropagationFlags.None,AccessControlType.Allow));
-            new DirectoryInfo(clipboardFolder).SetAccessControl(security);
-            var path=System.IO.Path.Combine(clipboardFolder,Guid.NewGuid()+extension); File.WriteAllBytes(path,bytes);
-            clipboardItems[path]=note; clipboardHashes.Add(hash); clipboardSequence=sequence; signature=""; Render();
+            new DirectoryInfo(notesDir).SetAccessControl(security);
+            var path=System.IO.Path.Combine(notesDir,Guid.NewGuid()+extension); File.WriteAllBytes(path,bytes);
+            if (extension==".png") clipboardItems[path]=null;
+            else clipboardItems[path]=new NoteEntry { Plain=plain!, IsRtf=rtf is not null };
+            clipboardHashes.Add(hash); clipboardSequence=sequence; signature=""; Render();
         }
         catch (ExternalException) { } // Retry the same sequence if another app temporarily owns the clipboard.
         catch (Exception e) { clipboardSequence=sequence; failure=e.Message; }

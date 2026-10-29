@@ -11,6 +11,9 @@ public sealed class Settings
     /// Paths currently pinned to the desktop as enlarged floating thumbnails (the "小夹子" feature).
     /// Persisted so the floating pins reopen after a restart.
     public List<string> DeskPins { get; set; } = [];
+    /// File names (inside the Notes folder) the user has favourited in the Text Envelope. Favourites
+    /// survive restarts and are exempt from the one-week auto-deletion of un-favourited notes.
+    public List<string> TextFavorites { get; set; } = [];
     public Dictionary<string, string> Dismissed { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public bool AlwaysVisible { get; set; }
     // On by default: screenshots and copied images land on the line without opting in.
@@ -59,7 +62,7 @@ public sealed class Settings
         try
         {
             var value = JsonSerializer.Deserialize<Settings>(text) ?? throw new JsonException();
-            if (value.Folders is null || value.Attached is null || value.Recent is null || value.Pins is null || value.PinSnapshots is null || value.Dismissed is null || value.DeskPins is null) throw new JsonException();
+            if (value.Folders is null || value.Attached is null || value.Recent is null || value.Pins is null || value.PinSnapshots is null || value.Dismissed is null || value.DeskPins is null || value.TextFavorites is null) throw new JsonException();
             value.Dismissed = new(value.Dismissed, StringComparer.OrdinalIgnoreCase);
             value.Capacity = Math.Clamp(value.Capacity, 3, 50);
             value.RevealDwell = Math.Clamp(value.RevealDwell, 0, 10000);

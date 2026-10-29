@@ -135,8 +135,12 @@ internal static class Native
         if (monitor == IntPtr.Zero) return false;
         var info = new MonitorInformation { Size = Marshal.SizeOf<MonitorInformation>() };
         if (!GetMonitorInfo(monitor, ref info)) return false;
-        return bounds.Left <= info.Monitor.Left && bounds.Top <= info.Monitor.Top &&
-               bounds.Right >= info.Monitor.Right && bounds.Bottom >= info.Monitor.Bottom;
+        // Compare against the work area (which excludes the taskbar), so a maximised window is also
+        // treated as covering the screen and suppresses the auto-reveal. With the whole monitor the
+        // comparison used before, a maximised browser/Excel/Word stops at the taskbar, failed the
+        // test, and let its title bar/ribbon sit in the top trigger strip and pop the rope up unasked.
+        return bounds.Left <= info.Work.Left && bounds.Top <= info.Work.Top &&
+               bounds.Right >= info.Work.Right && bounds.Bottom >= info.Work.Bottom;
     }
 
     // ---- Editing and move semantics ------------------------------------------
