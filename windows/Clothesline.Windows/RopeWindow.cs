@@ -10,6 +10,7 @@ using System.Security.Principal;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Data;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
@@ -70,6 +71,10 @@ internal sealed partial class RopeWindow : Window
     /// down to catch the drop, well before the collapsed strip could be reached. This is the
     /// "drag a file to the top of the screen" gesture from Explorer / the desktop.
     private const int DragBand = 90;
+    // PicRope 式"活"手感：卡片随风轻摆靠一个持续驱动的弹簧；绳子滑出也用弹簧缓动。
+    private readonly SpringMotion swayMotion = new(0.6, 0.7, 0);
+    private readonly DispatcherTimer animTimer = new() { Interval = TimeSpan.FromMilliseconds(33) };
+    private double windPhase;
     private Window? settingsWindow;
     private readonly Dictionary<string, PinWindow> deskWindows = [];
     private DispatcherTimer? clickTimer;
@@ -98,7 +103,7 @@ internal sealed partial class RopeWindow : Window
         PreviewDragOver += (_, e) => { e.Effects = settings.DropToHang && !selfDragging && e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None; e.Handled = true; };
         Drop += (_, e) => { if (settings.DropToHang && !selfDragging && e.Data.GetData(DataFormats.FileDrop) is string[] paths) Guard(() => Attach(paths)); e.Handled = true; };
         Loaded += (_, _) => Start();
-        Closed += (_, _) => { closing = true; if (handle != IntPtr.Zero) Native.UnregisterHotKey(handle, VisibilityHotKeyId); scanTimer.Stop(); pointerTimer.Stop(); Native.UninstallMouseHook(); foreach (var watcher in watchers) watcher.Dispose(); foreach (var w in deskWindows.Values) w.Close(); tray?.Dispose(); ClearClipboard(false, false); Application.Current.Shutdown(); };
+        Closed += (_, _) => { closing = true; if (handle != IntPtr.Zero) Native.UnregisterHotKey(handle, VisibilityHotKeyId); scanTimer.Stop(); pointerTimer.Stop(); animTimer.Stop(); Native.UninstallMouseHook(); foreach (var watcher in watchers) watcher.Dispose(); foreach (var w in deskWindows.Values) w.Close(); tray?.Dispose(); ClearClipboard(false, false); Application.Current.Shutdown(); };
     }
     private void Start()
     {
@@ -112,7 +117,7 @@ internal sealed partial class RopeWindow : Window
         Native.InstallMouseHook();
         scanTimer.Tick += async (_, _) => { await Scan(); PollClipboard(); };
         pointerTimer.Tick += (_, _) => PollPointer();
-        scanTimer.Start(); pointerTimer.Start(); _ = Scan();
+        scanTimer.Start(); pointerTimer.Start(); animTimer.Tick += (_, _) => SwayStep(); animTimer.Start(); _ = Scan();
         ReopenDeskPins();
         LoadNotes();
     }
@@ -259,6 +264,9 @@ internal sealed partial class RopeWindow : Window
     private UIElement CreateCard(FileRecord file, int position)
     {
         var stack = new StackPanel { Width = 130, Margin = new Thickness(5,0,5,12) };
+        // 以顶部中点为支点旋转，模拟卡片挂在绳上随风轻摆（PicRope 式）。
+        stack.RenderTransformOrigin = new Point(0.5, 0);
+        stack.RenderTransform = new RotateTransform();
         var clip = new ClothesClip(CurrentTheme, position) { HorizontalAlignment = HorizontalAlignment.Center };
         var clipBox = new Viewbox { Child = clip, Width = 13, Height = 24, Margin = new Thickness(0,0,0,-7), HorizontalAlignment = HorizontalAlignment.Center, IsHitTestVisible = false };
         stack.Children.Add(clipBox);
@@ -271,7 +279,7 @@ internal sealed partial class RopeWindow : Window
         body.Children.Add(new TextBlock { Text=note is not null ? T("文字便签","Text Note") : file.Name, TextTrimming=TextTrimming.CharacterEllipsis, FontSize=10, TextAlignment=TextAlignment.Center, Margin=new Thickness(3) });
         if (missing || pinned) body.Children.Add(new TextBlock { Text=missing ? T("文件失效","Unavailable") : T("已固定","Pinned"), FontSize=10, Foreground=missing ? Brushes.Firebrick : Brushes.SlateGray, TextAlignment=TextAlignment.Center });
         var card = new Border { Child=body, Background=Theme.Brush(CurrentTheme.CardSurface), BorderBrush=Theme.Brush(CurrentTheme.CardBorder), BorderThickness=new Thickness(1), CornerRadius=new CornerRadius(12), Padding=new Thickness(7),
-            Effect=new DropShadowEffect { BlurRadius=12, ShadowDepth=4, Opacity=.2 }, AllowDrop=true };
+            Effect=new DropShadowEffect { Color=Color.FromRgb(38,57,76), BlurRadius=22, ShadowDepth=6, Opacity=.16 }, AllowDrop=true };
         var name = note is not null ? T("文字便签","Text Note") : file.Name;
         card.ToolTip = name + "\n" + (clipboardItems.ContainsKey(file.Path) ? T("剪贴板（本次会话）","Clipboard (this session)") : System.IO.Path.GetDirectoryName(file.Path)) +
             "\n" + (file.IsDirectory ? T("文件夹（不递归计算大小）","Folder (contents not counted)") : $"{file.Size:N0} bytes") + "\n" + T("创建：","Created: ") + file.Created.ToLocalTime() + "\n" + T("修改：","Modified: ") + file.Modified.ToLocalTime() + (missing ? "\n" + T("源文件不存在或无法访问","Original is missing or inaccessible") : "");
@@ -289,9 +297,9 @@ internal sealed partial class RopeWindow : Window
         holder.Children.Add(card); holder.Children.Add(flash);
         if (settings.CardButtons)
         {
-            var pinButton = CardButton(pinned ? "●" : "○", pinned ? T("取消固定","Unpin") : T("固定","Pin"),
+            var pinButton = CardButton(ThemeIcons.Pin(CurrentTheme, pinned), pinned ? T("取消固定","Unpin") : T("固定","Pin"),
                 () => Guard(() => { if (!state.Pinned.Remove(file.Path)) state.Pinned.Add(file.Path); Persist(); signature=""; Render(); }));
-            var closeButton = CardButton("×", T("取下（保留原文件）","Take Down (Keep Original)"),
+            var closeButton = CardButton(ThemeIcons.Close(CurrentTheme), T("取下（保留原文件）","Take Down (Keep Original)"),
                 () => Guard(() => { state.Dismiss(file); Persist(); signature=""; Render(); }));
             var pinBar = new StackPanel { Orientation=Orientation.Horizontal, HorizontalAlignment=HorizontalAlignment.Left, VerticalAlignment=VerticalAlignment.Top, Margin=new Thickness(3,3,0,0) };
             pinBar.Children.Add(pinButton);
@@ -299,7 +307,7 @@ internal sealed partial class RopeWindow : Window
             closeBar.Children.Add(closeButton);
             if (IsImage(file.Path) && !file.IsDirectory)
             {
-                var desk = CardButton("钉", T("钉到桌面（小夹子）","Pin to desktop (clip)"),
+                var desk = CardButton(ThemeIcons.DeskPin(CurrentTheme), T("钉到桌面（小夹子）","Pin to desktop (clip)"),
                     () => Guard(() => DeskPin(file)));
                 pinBar.Children.Add(desk);
             }
@@ -428,18 +436,21 @@ internal sealed partial class RopeWindow : Window
     }
 
     private static bool IsImage(string path) => Array.Exists(ImageExtensions, e => path.EndsWith(e, StringComparison.OrdinalIgnoreCase));
-    private Button CardButton(string glyph, string tooltip, Action click)
+    private Button CardButton(UIElement icon, string tooltip, Action click)
     {
         var theme = CurrentTheme;
         var button = new Button
         {
-            Content=glyph, FontSize=11, FontWeight=FontWeights.Bold, Width=18, Height=18,
+            Content=icon, FontSize=11, FontWeight=FontWeights.Bold, Width=18, Height=18,
             Padding=new Thickness(0), BorderThickness=new Thickness(0),
             Background=new SolidColorBrush((Color)ColorConverter.ConvertFromString(theme.CardSurface)) { Opacity = 0.92 },
             Foreground=Theme.Brush(theme.CardText),
             Cursor=Cursors.Hand, ToolTip=tooltip, Opacity=.6
         };
         button.Click += (_,_) => click();
+        // 矢量图标描边跟随按钮前景色：悬停变白、离开还原，无需手工改描边。
+        if (button.Content is System.Windows.Shapes.Path p)
+            p.SetBinding(System.Windows.Shapes.Shape.StrokeProperty, new Binding("Foreground") { RelativeSource = new RelativeSource(RelativeSourceMode.FindAncestor, typeof(Button), 1) });
         button.MouseEnter += (_,_) => { button.Opacity=1; button.Background=Theme.Brush(theme.Accent); button.Foreground=Brushes.White; };
         button.MouseLeave += (_,_) => { button.Opacity=.6; button.Background=new SolidColorBrush((Color)ColorConverter.ConvertFromString(theme.CardSurface)) { Opacity = 0.92 }; button.Foreground=Theme.Brush(theme.CardText); };
         return button;
@@ -584,17 +595,31 @@ internal sealed partial class RopeWindow : Window
         {
             revealed = shown;
             var target = shown ? RevealHeight : CollapsedHeight;
-            // A short slide so the rope visibly "comes down to catch" a drag; the logical state flips at
-            // once so the drop target and click-through are already correct for the whole animation.
+            // 弹簧式滑出：轻微过冲带回弹，对应 PicRope 的 revealMotion 手感（CubicEase 只是减速，无回弹）。
             if (PresentationSource.FromVisual(this) is not null)
-                BeginAnimation(HeightProperty, new DoubleAnimation(target, TimeSpan.FromMilliseconds(shown ? 150 : 110))
-                { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } });
+                BeginAnimation(HeightProperty, new DoubleAnimation(target, TimeSpan.FromMilliseconds(shown ? 220 : 150))
+                { EasingFunction = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = shown ? 0.4 : 0 } });
             else Height = target;
         }
         // Capture only while revealed over a card or while a drag is in flight, so empty rope areas
         // stay click-through and a window title underneath can still be grabbed; the drop target is
         // live exactly when a file is being dragged over.
         Native.ClickThrough(this, !revealed || !(overCard || dragging));
+    }
+
+    // PicRope 式"活"手感：一个被缓慢风力持续驱动的弹簧，带动每张卡片绕顶部支点轻摆。
+    private void SwayStep()
+    {
+        windPhase += 0.033;
+        swayMotion.Target = Math.Sin(windPhase * 0.6) * 1.1;
+        swayMotion.Step(0.033);
+        var baseAngle = swayMotion.Position;
+        for (int i = 0; i < cards.Children.Count; i++)
+        {
+            if (cards.Children[i] is FrameworkElement fe && fe.RenderTransform is RotateTransform rt)
+                // 每张卡片加一点相位差，摆动更自然、不整齐划一。
+                rt.Angle = baseAngle + Math.Sin(windPhase * 0.6 + i * 0.5) * 0.5;
+        }
     }
     private void ClearClipboard(bool refresh=true, bool deleteFiles=true)
     {

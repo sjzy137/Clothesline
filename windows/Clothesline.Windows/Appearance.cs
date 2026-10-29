@@ -266,3 +266,70 @@ internal sealed class Thumbtack : Canvas
         Children.Add(body);
     }
 }
+
+/// <summary>阻尼弹簧运动（解析解）。移植自 PicRope 的 SpringMotion，用于绳子滑出与卡片随风轻摆的"活"手感。</summary>
+internal sealed class SpringMotion
+{
+    readonly double frequency, decay;
+    public double Position, Velocity, Target;
+    public bool Settled { get { return Position == Target && Velocity == 0; } }
+
+    public SpringMotion(double response, double damping, double initial)
+    {
+        double natural = 2 * Math.PI / response;
+        decay = natural * damping;
+        frequency = natural * Math.Sqrt(1 - damping * damping);
+        Snap(initial);
+    }
+
+    public void Snap(double value) { Position = Target = value; Velocity = 0; }
+
+    public void Step(double seconds)
+    {
+        if (seconds <= 0) return;
+        // 直接求阻尼振子的解析解，帧率变化时仍保持相同轨迹与连续速度。
+        double offset = Position - Target;
+        double sine = Math.Sin(frequency * seconds), cosine = Math.Cos(frequency * seconds);
+        double envelope = Math.Exp(-decay * seconds);
+        double coefficient = (Velocity + decay * offset) / frequency;
+        Position = Target + envelope * (offset * cosine + coefficient * sine);
+        Velocity = envelope * (Velocity * cosine - (decay * coefficient + frequency * offset) * sine);
+        if (Math.Abs(Position - Target) < 0.005 && Math.Abs(Velocity) < 0.01) Snap(Target);
+    }
+}
+
+/// <summary>PicRope 风格的矢量图标（直接复刻其几何），替代此前用的文字字形（× / ● / 钉）。</summary>
+internal static class ThemeIcons
+{
+    public static System.Windows.Shapes.Path Close(LineTheme theme)
+    {
+        return new System.Windows.Shapes.Path {
+            Width = 9, Height = 9, Stretch = System.Windows.Media.Stretch.Uniform,
+            Data = Geometry.Parse("M0,0 L9,9 M9,0 L0,9"),
+            Stroke = Theme.Brush(theme.CardText), StrokeThickness = 1.6,
+            StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round
+        };
+    }
+    public static System.Windows.Shapes.Path Pin(LineTheme theme, bool pinned)
+    {
+        var stroke = Theme.Brush(pinned ? theme.Accent : theme.CardText);
+        return new System.Windows.Shapes.Path {
+            Width = 10, Height = 11, Stretch = System.Windows.Media.Stretch.Uniform,
+            // 地图钉轮廓：上方圆头 + 下方尖针。
+            Data = Geometry.Parse("M5,1 A2.3,2.3 0 1 0 5,5.6 M5,5.6 L5,10"),
+            Stroke = stroke, StrokeThickness = 1.4,
+            StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round
+        };
+    }
+    public static System.Windows.Shapes.Path DeskPin(LineTheme theme)
+    {
+        // 工字钉轮廓：钉帽 + 针身。
+        return new System.Windows.Shapes.Path {
+            Width = 11, Height = 11, Stretch = System.Windows.Media.Stretch.Uniform,
+            Data = Geometry.Parse("M3.5,2 L7.5,2 L6.5,5.5 L8,9 L5.5,9 L5,7 L4.5,9 L2,9 L3.5,5.5 Z"),
+            Stroke = Theme.Brush(theme.CardText), StrokeThickness = 1.3,
+            StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round,
+            Fill = System.Windows.Media.Brushes.Transparent
+        };
+    }
+}
