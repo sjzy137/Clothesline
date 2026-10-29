@@ -60,6 +60,7 @@ internal sealed partial class RopeWindow : Window
     private DateTime lastInside = DateTime.MinValue;
     private DateTime? enteredTopAt;
     private Window? settingsWindow;
+    private readonly Dictionary<string, PinWindow> deskWindows = [];
     private string? clipboardFolder;
     private DispatcherTimer? clickTimer;
     private IntPtr handle;
@@ -70,6 +71,7 @@ internal sealed partial class RopeWindow : Window
         this.settings = settings; this.save = save;
         foreach (var pair in settings.Dismissed) state.Dismissed[pair.Key] = pair.Value;
         foreach (var path in settings.Pins) state.Pinned.Add(path);
+        foreach (var path in settings.DeskPins) state.DeskPins.Add(path);
         Title = "Clothesline"; Width = SystemParameters.WorkArea.Width; Height = RevealHeight;
         Left = SystemParameters.WorkArea.Left; Top = SystemParameters.WorkArea.Top;
         WindowStyle = WindowStyle.None; ResizeMode = ResizeMode.NoResize; AllowsTransparency = true;
@@ -82,7 +84,7 @@ internal sealed partial class RopeWindow : Window
         PreviewDragOver += (_, e) => { e.Effects = settings.DropToHang && e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None; e.Handled = true; };
         Drop += (_, e) => { if (settings.DropToHang && e.Data.GetData(DataFormats.FileDrop) is string[] paths) Guard(() => Attach(paths)); e.Handled = true; };
         Loaded += (_, _) => Start();
-        Closed += (_, _) => { closing = true; if (handle != IntPtr.Zero) Native.UnregisterHotKey(handle, VisibilityHotKeyId); scanTimer.Stop(); pointerTimer.Stop(); foreach (var watcher in watchers) watcher.Dispose(); tray?.Dispose(); ClearClipboard(false); Application.Current.Shutdown(); };
+        Closed += (_, _) => { closing = true; if (handle != IntPtr.Zero) Native.UnregisterHotKey(handle, VisibilityHotKeyId); scanTimer.Stop(); pointerTimer.Stop(); foreach (var watcher in watchers) watcher.Dispose(); foreach (var w in deskWindows.Values) w.Close(); tray?.Dispose(); ClearClipboard(false); Application.Current.Shutdown(); };
     }
     private void Start()
     {
@@ -95,6 +97,7 @@ internal sealed partial class RopeWindow : Window
         scanTimer.Tick += async (_, _) => { await Scan(); PollClipboard(); };
         pointerTimer.Tick += (_, _) => PollPointer();
         scanTimer.Start(); pointerTimer.Start(); _ = Scan();
+        ReopenDeskPins();
     }
     private void RegisterHotKey()
     {
@@ -184,7 +187,7 @@ internal sealed partial class RopeWindow : Window
     }
     private void Persist()
     {
-        settings.Dismissed = state.Dismissed.Where(p=>!clipboardItems.ContainsKey(p.Key)).ToDictionary(p=>p.Key,p=>p.Value,StringComparer.OrdinalIgnoreCase); settings.Pins = state.Pinned.ToList();
+        settings.Dismissed = state.Dismissed.Where(p=>!clipboardItems.ContainsKey(p.Key)).ToDictionary(p=>p.Key,p=>p.Value,StringComparer.OrdinalIgnoreCase); settings.Pins = state.Pinned.ToList(); settings.DeskPins = state.DeskPins.ToList();
         settings.PinSnapshots = state.Pinned.Select(p => FileRecord.Read(p) ?? settings.PinSnapshots.FirstOrDefault(f => string.Equals(f.Path,p,StringComparison.OrdinalIgnoreCase))).OfType<FileRecord>().ToList();
         try { save(); } catch (Exception e) { failure = e.Message; }
     }
@@ -275,6 +278,12 @@ internal sealed partial class RopeWindow : Window
             pinBar.Children.Add(pinButton);
             var closeBar = new StackPanel { Orientation=Orientation.Horizontal, HorizontalAlignment=HorizontalAlignment.Right, VerticalAlignment=VerticalAlignment.Top, Margin=new Thickness(0,3,3,0) };
             closeBar.Children.Add(closeButton);
+            if (IsImage(file.Path) && !file.IsDirectory)
+            {
+                var desk = CardButton("钉", T("钉到桌面（小夹子）","Pin to desktop (clip)"),
+                    () => Guard(() => DeskPin(file)));
+                pinBar.Children.Add(desk);
+            }
             // Buttons are siblings of the card, not children, so their clicks never route through
             // the card handlers and cannot start a drag.
             holder.Children.Add(pinBar); holder.Children.Add(closeBar);
@@ -359,6 +368,46 @@ internal sealed partial class RopeWindow : Window
         tray.ShowBalloonTip(4000);
     }
 
+    /// Pins an image to the desktop as an enlarged floating thumbnail (the "小夹子" feature). The
+    /// card stays on the rope, so its right-click menu keeps working. Re-pinning an already-pinned
+    /// file just brings its window to the front.
+    private void DeskPin(FileRecord file)
+    {
+        if (deskWindows.TryGetValue(file.Path, out var existing))
+        {
+            existing.Activate();
+            return;
+        }
+        var window = new PinWindow(file, path =>
+        {
+            if (deskWindows.TryGetValue(path, out var w)) { deskWindows.Remove(path); w.Close(); }
+            state.DeskPins.Remove(path); Persist();
+        });
+        deskWindows[file.Path] = window;
+        state.DeskPins.Add(file.Path); Persist();
+        window.Show();
+    }
+
+    /// Reopens the floating desktop pins that were persisted the last time the app ran.
+    private void ReopenDeskPins()
+    {
+        foreach (var path in state.DeskPins.ToArray())
+        {
+            var file = FileRecord.Read(path);
+            if (file is null) { state.DeskPins.Remove(path); continue; }
+            if (deskWindows.ContainsKey(path)) continue;
+            var window = new PinWindow(file, p =>
+            {
+                if (deskWindows.TryGetValue(p, out var w)) { deskWindows.Remove(p); w.Close(); }
+                state.DeskPins.Remove(p); Persist();
+            });
+            deskWindows[path] = window;
+            window.Show();
+        }
+        if (state.DeskPins.Count > 0) Persist();
+    }
+
+    private static bool IsImage(string path) => Array.Exists(ImageExtensions, e => path.EndsWith(e, StringComparison.OrdinalIgnoreCase));
     private static Button CardButton(string glyph, string tooltip, Action click)
     {
         var button = new Button
@@ -419,7 +468,6 @@ internal sealed partial class RopeWindow : Window
     /// every other drop target understands.
     internal static DataObject FilePayload(string path)
     { var data = new DataObject(); data.SetFileDropList(new StringCollection { path }); return data; }
-    internal static bool IsImage(string path) => ImageExtensions.Contains(System.IO.Path.GetExtension(path).ToLowerInvariant());
     internal static bool IsText(string path) => TextExtensions.Contains(System.IO.Path.GetExtension(path).ToLowerInvariant());
     private void Validate(FileRecord file)
     { if (FileRecord.Read(file.Path) is null) throw new IOException(T("源文件不存在或无法访问。","The original file is missing or inaccessible.")); }

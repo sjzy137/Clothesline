@@ -65,6 +65,8 @@ public sealed class RopeState
 {
     public Dictionary<string, string> Dismissed { get; } = new(StringComparer.OrdinalIgnoreCase);
     public HashSet<string> Pinned { get; } = new(StringComparer.OrdinalIgnoreCase);
+    /// File paths pinned to the desktop as enlarged floating thumbnails (the "小夹子" feature).
+    public HashSet<string> DeskPins { get; } = new(StringComparer.OrdinalIgnoreCase);
     public List<FileRecord> Select(IEnumerable<FileRecord> records, int capacity)
     {
         var files = records.GroupBy(f => f.Path, StringComparer.OrdinalIgnoreCase).Select(g => g.First())
