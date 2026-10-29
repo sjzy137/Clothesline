@@ -9,6 +9,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Microsoft.Win32;
+using Forms = System.Windows.Forms;
 
 namespace Clothesline.Windows;
 internal static class Native
@@ -135,12 +136,71 @@ internal static class Native
         if (monitor == IntPtr.Zero) return false;
         var info = new MonitorInformation { Size = Marshal.SizeOf<MonitorInformation>() };
         if (!GetMonitorInfo(monitor, ref info)) return false;
-        // Compare against the work area (which excludes the taskbar), so a maximised window is also
-        // treated as covering the screen and suppresses the auto-reveal. With the whole monitor the
-        // comparison used before, a maximised browser/Excel/Word stops at the taskbar, failed the
-        // test, and let its title bar/ribbon sit in the top trigger strip and pop the rope up unasked.
-        return bounds.Left <= info.Work.Left && bounds.Top <= info.Work.Top &&
-               bounds.Right >= info.Work.Right && bounds.Bottom >= info.Work.Bottom;
+        // Compare against the FULL monitor bounds (including the taskbar row). A maximised window
+        // stops at the work area and never reaches the taskbar, so it no longer counts as "covering
+        // the screen" and no longer suppresses the rope. Only a true exclusive full-screen window
+        // (game / video) that spans every pixel, including the taskbar, hides the rope — matching
+        // PicRope's behaviour and fixing the "summon fails / title bar flashes" reports.
+        return bounds.Left <= info.Monitor.Left && bounds.Top <= info.Monitor.Top &&
+               bounds.Right >= info.Monitor.Right && bounds.Bottom >= info.Monitor.Bottom;
+    }
+
+    // ---- Title-bar / caption-button avoidance ----------------------------------
+    // When the pointer is over the minimise/maximise/close buttons of a maximised window, the rope
+    // must step aside so it does not cover those buttons or flicker while the user clicks them. This
+    // mirrors PicRope's OverCaptionButtons and removes the "title bar flash" users reported.
+    [DllImport("user32.dll")] private static extern IntPtr GetShellWindow();
+    [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr window);
+    [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr window);
+    [DllImport("dwmapi.dll")] private static extern int DwmGetWindowAttribute(IntPtr window, int attribute, out int value, int size);
+    private delegate bool EnumWindowsProc(IntPtr window, IntPtr parameter);
+    [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr parameter);
+    [DllImport("user32.dll")] private static extern IntPtr MonitorFromPoint(PointNative point, uint flags);
+    [DllImport("shcore.dll")] private static extern int GetDpiForMonitor(IntPtr monitor, int type, out uint x, out uint y);
+
+    public static double MonitorScale(Forms.Screen screen)
+    {
+        var point = new PointNative { X = (int)(screen.Bounds.Left + screen.Bounds.Width / 2), Y = (int)(screen.Bounds.Top + screen.Bounds.Height / 2) };
+        uint x, y;
+        return GetDpiForMonitor(MonitorFromPoint(point, 2), 0, out x, out y) == 0 ? x / 96.0 : 1;
+    }
+
+    /// True when the cursor sits on the minimise/maximise/close buttons of a maximised window, so the
+    /// rope should hide itself instead of covering those controls. Adapted from PicRope's
+    /// OverCaptionButtons.
+    public static bool OverCaptionButtons(IntPtr overlay)
+    {
+        var cursor = Cursor;
+        var screen = Forms.Screen.FromPoint(new System.Drawing.Point((int)cursor.X, (int)cursor.Y));
+        double scale = MonitorScale(screen);
+        var bounds = screen.Bounds;
+        var work = screen.WorkingArea;
+        if (cursor.X < Math.Min(bounds.Right, work.Right) - 150 * scale || cursor.X >= bounds.Right
+            || cursor.Y < bounds.Top || cursor.Y >= Math.Max(bounds.Top, work.Top) + 40 * scale) return false;
+        System.Drawing.Rectangle rect = new();
+        bool found = false;
+        EnumWindows((window, _) =>
+        {
+            if (window == overlay || window == GetShellWindow() || !IsWindowVisible(window) || IsIconic(window)
+                || (GetWindowLong(window, -20).ToInt64() & 0x20) != 0) return true;
+            int cloaked;
+            if (DwmGetWindowAttribute(window, 14, out cloaked, sizeof(int)) == 0 && cloaked != 0) return true;
+            if (!GetWindowRect(window, out var candidate) || cursor.X < candidate.Left || cursor.X >= candidate.Right
+                || cursor.Y < candidate.Top || cursor.Y >= candidate.Bottom) return true;
+            var name = new StringBuilder(256);
+            if (GetClassName(window, name, 256) <= 0) return true;
+            var type = name.ToString();
+            if (type == "WorkerW" || type == "Progman" || type.StartsWith("Shell_")) return true;
+            rect = new System.Drawing.Rectangle(candidate.Left, candidate.Top, candidate.Right - candidate.Left, candidate.Bottom - candidate.Top);
+            found = true;
+            return false;
+        }, IntPtr.Zero);
+        if (!found) return false;
+        if (rect.Left > work.Left || rect.Top > work.Top || rect.Right < work.Right || rect.Bottom < work.Bottom) return false;
+        if (rect.Right > bounds.Right + 16 * scale || rect.Right <= bounds.Left || rect.Top >= bounds.Bottom
+            || rect.Right - rect.Left < 280 * scale || rect.Bottom - rect.Top < 80 * scale) return false;
+        double right = Math.Min(rect.Right, bounds.Right), top = Math.Max(rect.Top, bounds.Top);
+        return cursor.X >= right - 150 * scale && cursor.X < right && cursor.Y >= top && cursor.Y < top + 40 * scale;
     }
 
     // ---- Editing and move semantics ------------------------------------------

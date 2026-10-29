@@ -312,6 +312,26 @@ internal sealed partial class RopeWindow
             applying = true; reopenSettings?.Invoke();
         };
         panel.Children.Add(Field(T("语言","Language"), language));
+
+        // Appearance theme (PicRope five themes): the rope + clips switch as a set. Kept in Settings
+        // per request, while the tray "外观…" item still opens the live preview window.
+        var themeBox = new ComboBox { Width = 240, HorizontalAlignment = HorizontalAlignment.Left };
+        foreach (var theme in LineTheme.All) themeBox.Items.Add(theme.Name);
+        var themeIndex = Array.FindIndex(LineTheme.All, t => t.Id == settings.Appearance);
+        themeBox.SelectedIndex = themeIndex >= 0 ? themeIndex : 3;
+        themeBox.SelectionChanged += (_, _) =>
+        {
+            if (themeBox.SelectedIndex < 0) return;
+            var theme = LineTheme.All[themeBox.SelectedIndex];
+            settings.Appearance = theme.Id; Persist(); signature = ""; Render();
+        };
+        var previewAppearance = new Button { Content = T("外观预览…","Appearance preview…"), Padding = new Thickness(12, 5, 12, 5), Margin = new Thickness(8, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+        previewAppearance.Click += (_, _) => ShowAppearance();
+        var themeRow = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        themeRow.Children.Add(themeBox); themeRow.Children.Add(previewAppearance);
+        panel.Children.Add(Field(T("外观主题","Appearance theme"), themeRow,
+            Hint(T("绳子与夹子整套切换：经典银灰 / 棉麻木夹 / 奶白轻盈 / 柔彩日常 / 石墨金属。",
+                 "Switches the rope and clips as a set: Classic Silver / Linen Woodclip / Porcelain Light / Soft Daily / Graphite Metal."))));
         return panel;
     }
 

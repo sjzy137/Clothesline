@@ -25,10 +25,6 @@ using Forms = System.Windows.Forms;
 namespace Clothesline.Windows;
 internal sealed partial class RopeWindow : Window
 {
-    /// How long the pointer has to be gone before the rope slides back up. The real value is a
-    /// setting; this is only the default and the bound it is clamped to.
-    private const int RevealMilliseconds = 1800;
-    private int RevealGrace => Math.Clamp(settings.RevealDelay > 0 ? settings.RevealDelay : RevealMilliseconds, 200, 30000);
     /// Open and collapsed heights. The collapsed strip is what the pointer has to reach to bring the
     /// rope down, and it is deliberately thin so it never covers anything underneath.
     private const int RevealHeight = 178;
@@ -58,8 +54,14 @@ internal sealed partial class RopeWindow : Window
     private string hotKeyNotice = "";
     private double scrollOffset;
     private uint clipboardSequence;
-    private DateTime lastInside = DateTime.MinValue;
-    private DateTime? enteredTopAt;
+    private bool revealed;
+    private DateTime edgeSince = DateTime.MaxValue;
+    private DateTime awaySince = DateTime.MaxValue;
+    private bool avoidingCaption;
+    /// Top-edge summon band: the screen strip (including a top taskbar, if present) plus this many
+    /// pixels into the work area that triggers the rope. In screen coordinates so it works no matter
+    /// where the rope window sits — the robust half of PicRope's reveal logic.
+    private const int TriggerBand = 10;
     private Window? settingsWindow;
     private readonly Dictionary<string, PinWindow> deskWindows = [];
     private DispatcherTimer? clickTimer;
@@ -132,7 +134,6 @@ internal sealed partial class RopeWindow : Window
     {
         settings.AlwaysVisible = !settings.AlwaysVisible;
         Persist();
-        if (settings.AlwaysVisible) lastInside = DateTime.UtcNow;
         signature = ""; Render();
     }
     private void RebuildWatchers()
@@ -486,36 +487,83 @@ internal sealed partial class RopeWindow : Window
     private void PollPointer()
     {
         if (busy) return;
-        var local = PointFromScreen(Native.Cursor);
-        var overCard = Height>8 && local.X>=0 && local.X<=Width && local.Y>=0 && local.Y<=Height && cardViews.Any(v => { var p=v.TranslatePoint(new Point(),this); return new Rect(p,v.RenderSize).Contains(local); });
-        var nearTop = local.X>=0 && local.X<=Width && local.Y>=0 && local.Y<=8;
-        // A held button with the pointer over the rope means something is being dragged towards it.
-        // This cannot be gated on the rope already being open, because a collapsed rope offers
-        // nothing to aim at and a drop target that only exists once open can never be reached.
-        var dragging = Native.MousePressed && local.X>=0 && local.X<=Width && local.Y>=0 && local.Y<=RevealHeight;
-        // A hover near the top edge summons the rope, but only after the pointer has lingered there
-        // for RevealDwell milliseconds. A hover over a card or an in-flight drag reveals at once,
-        // because those are already direct interactions rather than a passive summon. When RevealDwell
-        // is 0 the top-edge summon is immediate, matching the original behaviour.
-        var inTrigger = nearTop || overCard || dragging;
-        if (inTrigger)
+        var cursor = Native.Cursor;
+        var screen = Forms.Screen.FromPoint(new System.Drawing.Point((int)cursor.X, (int)cursor.Y));
+        bool down = Native.MousePressed;
+        // Top-edge summon zone in SCREEN coordinates: from the very top of the monitor, through any top
+        // taskbar, plus a few pixels into the work area. Robust regardless of where the rope window
+        // sits (the fix for "can't summon at the top"); this is the reliable half of PicRope's logic.
+        bool nearTop = cursor.X >= screen.Bounds.Left && cursor.X < screen.Bounds.Right
+            && cursor.Y >= screen.Bounds.Top && cursor.Y <= screen.WorkingArea.Top + TriggerBand;
+        // Poll faster while the rope is in play, like PicRope, to keep the summon snappy without
+        // burning CPU while it is tucked away.
+        var interval = revealed || nearTop ? 30 : 100;
+        if (pointerTimer.Interval.TotalMilliseconds != interval) pointerTimer.Interval = TimeSpan.FromMilliseconds(interval);
+        var local = PointFromScreen(cursor);
+        bool overCard = revealed && local.X >= 0 && local.X <= Width && local.Y >= 0 && local.Y <= Height
+            && cardViews.Any(v => { var p = v.TranslatePoint(new Point(), this); return new Rect(p, v.RenderSize).Contains(local); });
+        // A held button in the rope's drop zone means a file is being dragged onto it. It is not gated
+        // on the rope already being open, because a collapsed rope offers nothing to aim at — keeping
+        // it open lets the drop land (a feature beyond PicRope, which only drags out).
+        bool dragging = down && settings.DropToHang && local.X >= 0 && local.X <= Width && local.Y >= 0 && local.Y <= RevealHeight;
+        var now = DateTime.UtcNow;
+        bool show;
+
+        if (settings.AlwaysVisible) show = true;
+        else if ((revealed || nearTop || avoidingCaption) && Native.OverCaptionButtons(handle))
         {
-            if (enteredTopAt is null) enteredTopAt = DateTime.UtcNow;
-            var stayed = (DateTime.UtcNow - enteredTopAt.Value).TotalMilliseconds;
-            var dwellOk = overCard || dragging || settings.RevealDwell <= 0 || stayed >= settings.RevealDwell;
-            if (dwellOk) lastInside = DateTime.UtcNow;
+            // Step aside from a maximised window's min/max/close buttons so the rope never covers them
+            // or flickers while the user clicks — mirrors PicRope's caption avoidance; kills the flash.
+            edgeSince = DateTime.MaxValue;
+            if (revealed) avoidingCaption = true;
+            show = false;
         }
-        else enteredTopAt = null;
-        // Stay out of the way of full-screen video and games, and give the pointer a moment of grace.
-        // A drag overrides the full-screen rule: a maximised Explorer covers the whole monitor, so
-        // without that override the rope would stay collapsed and the file could never be dropped.
-        var covered=settings.HideFullScreen && Native.ForegroundCoversMonitor();
-        var reveal=(dragging || !covered) &&
-            (settings.AlwaysVisible || DateTime.UtcNow-lastInside<TimeSpan.FromMilliseconds(RevealGrace));
-        Height=reveal ? RevealHeight : CollapsedHeight;
-        // Swallow input only where there is something to hit: over a card, or anywhere on the rope
-        // while a drag is in flight so a file can land on empty rope as well.
-        Native.ClickThrough(this, !reveal || !(overCard || dragging));
+        else if (avoidingCaption && !down)
+        {
+            avoidingCaption = false;
+            show = local.X >= 0 && local.X <= Width && local.Y >= 0 && local.Y <= RevealHeight;
+        }
+        else
+        {
+            // A true exclusive full-screen window (game / video) spans the whole monitor including the
+            // taskbar, so unlike a maximised window it hides the rope. Gated by the adjustable HideFullScreen.
+            bool covered = settings.HideFullScreen && Native.ForegroundCoversMonitor();
+            if (covered) show = false;
+            else if (dragging) { awaySince = DateTime.MaxValue; show = true; }
+            else if (nearTop && !down)
+            {
+                if (edgeSince == DateTime.MaxValue) edgeSince = now;
+                var dwell = settings.RevealDwell > 0 ? settings.RevealDwell : 0;
+                show = now - edgeSince >= TimeSpan.FromMilliseconds(dwell);
+            }
+            else
+            {
+                edgeSince = DateTime.MaxValue;
+                if (revealed)
+                {
+                    bool inside = local.X >= 0 && local.X <= Width && local.Y >= 0 && local.Y <= RevealHeight;
+                    if (inside) { awaySince = DateTime.MaxValue; show = true; }
+                    else
+                    {
+                        if (awaySince == DateTime.MaxValue) awaySince = now;
+                        var grace = settings.RevealDelay > 0 ? settings.RevealDelay : 1200;
+                        show = now - awaySince <= TimeSpan.FromMilliseconds(grace);
+                    }
+                }
+                else show = false;
+            }
+        }
+
+        SetReveal(show, overCard, dragging);
+    }
+
+    private void SetReveal(bool shown, bool overCard, bool dragging)
+    {
+        if (shown != revealed) { revealed = shown; Height = shown ? RevealHeight : CollapsedHeight; }
+        // Capture only while revealed over a card or while a drag is in flight, so empty rope areas
+        // stay click-through and a window title underneath can still be grabbed; the drop target is
+        // live exactly when a file is being dragged over.
+        Native.ClickThrough(this, !revealed || !(overCard || dragging));
     }
     private void ClearClipboard(bool refresh=true, bool deleteFiles=true)
     {
