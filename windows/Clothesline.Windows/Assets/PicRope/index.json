@@ -1,0 +1,47 @@
+{
+ "classic": {
+  "width": 200,
+  "height": 179,
+  "hook": [
+   0.4718,
+   0.0622
+  ],
+  "bytes": 52085
+ },
+ "linen": {
+  "width": 200,
+  "height": 174,
+  "hook": [
+   0.4643,
+   0.06
+  ],
+  "bytes": 55395
+ },
+ "porcelain": {
+  "width": 200,
+  "height": 186,
+  "hook": [
+   0.4333,
+   0.08
+  ],
+  "bytes": 38033
+ },
+ "color": {
+  "width": 200,
+  "height": 165,
+  "hook": [
+   0.4746,
+   0.0597
+  ],
+  "bytes": 42399
+ },
+ "graphite": {
+  "width": 200,
+  "height": 176,
+  "hook": [
+   0.4509,
+   0.0588
+  ],
+  "bytes": 42454
+ }
+}

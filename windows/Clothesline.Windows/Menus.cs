@@ -194,7 +194,7 @@ internal sealed partial class RopeWindow
     private void ShowAbout()
     {
         var license=System.IO.Path.Combine(AppContext.BaseDirectory,"LICENSE.txt");
-        var text="Clothesline Windows 0.1.0-rc.10\n\n"+T("把常用文件挂在屏幕顶部，随手预览、拖拽和使用。","Keep files at the top of your screen for quick access and drag and drop.")+"\n\nhttps://github.com/zhongguozhang/Clothesline\n\n"+(File.Exists(license) ? File.ReadAllText(license) : "MIT License — see repository LICENSE");
+        var text="Clothesline Windows 0.1.0-rc.11\n\n"+T("把常用文件挂在屏幕顶部，随手预览、拖拽和使用。","Keep files at the top of your screen for quick access and drag and drop.")+"\n\nhttps://github.com/zhongguozhang/Clothesline\n\n"+(File.Exists(license) ? File.ReadAllText(license) : "MIT License — see repository LICENSE");
         var window=new Window { Title=T("关于 Clothesline","About Clothesline"),Width=580,Height=500,Owner=this,WindowStartupLocation=WindowStartupLocation.CenterScreen };
         window.Content=new TextBox { Text=text,IsReadOnly=true,TextWrapping=TextWrapping.Wrap,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,Margin=new Thickness(16) }; window.Show();
     }
@@ -206,7 +206,7 @@ internal sealed partial class RopeWindow
             using var client=new HttpClient { Timeout=TimeSpan.FromSeconds(20) }; client.DefaultRequestHeaders.UserAgent.ParseAdd("Clothesline-Windows/0.1.0");
             using var json=JsonDocument.Parse(await client.GetStringAsync("https://api.github.com/repos/zhongguozhang/Clothesline/releases?per_page=100"));
             // Separate platform tag prevents either app from offering the other platform's installer.
-            var current=ReleaseVersion.Parse("windows-v0.1.0-rc.10")!;
+            var current=ReleaseVersion.Parse("windows-v0.1.0-rc.11")!;
             var newer=json.RootElement.EnumerateArray().Where(r=>!r.GetProperty("draft").GetBoolean())
                 .Select(r=>(Version:ReleaseVersion.Parse(r.GetProperty("tag_name").GetString()),Url:r.GetProperty("html_url").GetString()!))
                 .Where(r=>r.Version is not null && r.Version.CompareTo(current)>0 && r.Url.StartsWith("https://github.com/zhongguozhang/Clothesline/releases/tag/windows-v",StringComparison.Ordinal))

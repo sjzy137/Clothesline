@@ -430,6 +430,14 @@ internal sealed partial class RopeWindow
         envelope.Click += (_, _) => ShowTextEnvelope();
         panel.Children.Add(Field(T("文字信封","Text Envelope"), envelope,
             Hint(T("查看、复制或收藏所有已收集的文字便签。","View, copy, or favourite every collected text note."))));
+
+        // The Picture Basket is the image equivalent: the rope only ever shows a few items, so pictures
+        // are archived here as they pass through.
+        var basketButton = new Button { Content = T("打开图片篮子…","Open Picture Basket…"), HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 4, 0, 0), Padding = new Thickness(16, 5, 16, 5) };
+        basketButton.Click += (_, _) => ShowPictureBasket();
+        panel.Children.Add(Field(T("图片篮子","Picture Basket"), basketButton,
+            Hint(T("晾衣绳上出现过的每一张图片都会自动收进篮子，可随时翻看、拖出或挂回绳子；绳子右端的篮子吊坠也可直接点开。",
+              "Every picture that has been on the rope is collected here, ready to browse, drag out or hang back; the basket pendant at the right end of the rope opens it too."))));
         return panel;
     }
 

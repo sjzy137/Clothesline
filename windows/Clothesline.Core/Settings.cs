@@ -1,6 +1,18 @@
 using System.Text.Json;
 namespace Clothesline.Core;
 
+/// One entry in the Picture Basket. Only the path is stored: copying every image into a private
+/// folder would double the disk usage of screenshots the user already owns, and the basket is an
+/// archive of what has been hung, not a second copy of it. A missing file therefore degrades to a
+/// greyed placeholder instead of an error.
+public sealed class BasketPicture
+{
+    public string Path { get; set; } = "";
+    public DateTime Added { get; set; }
+    /// Starred pictures are kept when the basket is trimmed and are exempt from auto-expiry.
+    public bool Starred { get; set; }
+}
+
 public sealed class Settings
 {
     public List<string> Folders { get; set; } = [];
@@ -14,6 +26,10 @@ public sealed class Settings
     /// File names (inside the Notes folder) the user has favourited in the Text Envelope. Favourites
     /// survive restarts and are exempt from the one-week auto-deletion of un-favourited notes.
     public List<string> TextFavorites { get; set; } = [];
+    /// The Picture Basket archive. The rope itself only shows a handful of items at a time and taking
+    /// one down hides it, so every image that is ever hung is recorded here and stays browsable —
+    /// the picture equivalent of the Text Envelope.
+    public List<BasketPicture> Pictures { get; set; } = [];
     /// UI appearance theme id (PicRope-derived five themes: classic/linen/porcelain/color/graphite).
     /// Persisted so the chosen rope+clip look survives restarts; falls back to "color".
     public string Appearance { get; set; } = "color";
@@ -66,6 +82,8 @@ public sealed class Settings
         {
             var value = JsonSerializer.Deserialize<Settings>(text) ?? throw new JsonException();
             if (value.Folders is null || value.Attached is null || value.Recent is null || value.Pins is null || value.PinSnapshots is null || value.Dismissed is null || value.DeskPins is null || value.TextFavorites is null) throw new JsonException();
+            if (value.Pictures is null) value.Pictures = [];
+            value.Pictures.RemoveAll(p => p is null || string.IsNullOrWhiteSpace(p.Path));
             value.Dismissed = new(value.Dismissed, StringComparer.OrdinalIgnoreCase);
             value.Capacity = Math.Clamp(value.Capacity, 3, 50);
             value.RevealDwell = Math.Clamp(value.RevealDwell, 0, 10000);

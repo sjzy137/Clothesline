@@ -219,6 +219,9 @@ internal sealed partial class RopeWindow : Window
             var file = FileRecord.Read(path); if (file is null) continue;
             if (!settings.Attached.Contains(file.Path, StringComparer.OrdinalIgnoreCase)) settings.Attached.Insert(0, file.Path);
             state.Dismissed.Remove(file.Path);
+            // Every picture that reaches the rope is also filed in the basket, which keeps browsing
+            // it possible long after the card has been taken down.
+            RememberPicture(file.Path);
             settings.Recent.RemoveAll(p=>string.Equals(p,file.Path,StringComparison.OrdinalIgnoreCase)); settings.Recent.Insert(0,file.Path);
             settings.Recent=settings.Recent.Take(200).ToList();
         }
@@ -247,7 +250,7 @@ internal sealed partial class RopeWindow : Window
     {
         if (busy) return;
         var files = state.Select(Records(), settings.Capacity);
-        var key = settings.English + ":" + Width + string.Join("|", files.Select(f => f.Path + f.Fingerprint + state.Pinned.Contains(f.Path) + (FileRecord.Read(f.Path) is null))) + clipboardItems.Count;
+        var key = settings.English + ":" + Width + string.Join("|", files.Select(f => f.Path + f.Fingerprint + state.Pinned.Contains(f.Path) + (FileRecord.Read(f.Path) is null))) + clipboardItems.Count + ":" + settings.Appearance + ":" + settings.Pictures.Count;
         if (signature == key) return; signature = key;
         cards.Children.Clear(); cardViews.Clear(); cardFlashes.Clear();
         foreach (var file in files) cards.Children.Add(CreateCard(file, cards.Children.Count));
@@ -257,6 +260,10 @@ internal sealed partial class RopeWindow : Window
             Data = new PathGeometry([new PathFigure(new Point(0,10), [new QuadraticBezierSegment(new Point(Width/2,32),new Point(Width,10),true)],false)]) };
         RopeLine.Apply(rope, theme);
         surface.Children.Insert(0, rope);
+        // The picture basket hangs off the right-hand end of the rope, like PicRope's basket.
+        basketPendant = null;
+        var pendant = CreateBasketPendant(theme);
+        surface.Children.Add(pendant);
         // Wheel scrolling keeps overflow and pinned cards reachable.
         cards.Width = double.NaN;
         Canvas.SetLeft(cards, 10-scrollOffset);
@@ -534,6 +541,9 @@ internal sealed partial class RopeWindow : Window
         var local = PointFromScreen(cursor);
         bool overCard = revealed && local.X >= 0 && local.X <= Width && local.Y >= 0 && local.Y <= Height
             && cardViews.Any(v => { var p = v.TranslatePoint(new Point(), this); return new Rect(p, v.RenderSize).Contains(local); });
+        // The basket pendant has to be clickable too, so it counts the same way a card does.
+        bool overBasket = revealed && basketPendant is { } pendant && local.X >= 0 && local.X <= Width && local.Y >= 0 && local.Y <= Height
+            && new Rect(pendant.TranslatePoint(new Point(), this), pendant.RenderSize).Contains(local);
         // A held button in the rope's drop zone means a file is being dragged onto it. It is not gated
         // on the rope already being open, because a collapsed rope offers nothing to aim at — keeping
         // it open lets the drop land (a feature beyond PicRope, which only drags out).
@@ -586,7 +596,7 @@ internal sealed partial class RopeWindow : Window
             }
         }
 
-        SetReveal(show, overCard, dragging);
+        SetReveal(show, overCard || overBasket, dragging);
     }
 
     private void SetReveal(bool shown, bool overCard, bool dragging)

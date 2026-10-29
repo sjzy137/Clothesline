@@ -7,7 +7,7 @@
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <UseWPF>true</UseWPF><UseWindowsForms>true</UseWindowsForms><EnableWindowsTargeting>true</EnableWindowsTargeting>
     <ImplicitUsings>disable</ImplicitUsings><Nullable>enable</Nullable><LangVersion>12</LangVersion>
-    <AssemblyName>Clothesline</AssemblyName><Version>0.1.0</Version><InformationalVersion>0.1.0-windows-rc.10</InformationalVersion>
+    <AssemblyName>Clothesline</AssemblyName><Version>0.1.0</Version><InformationalVersion>0.1.0-windows-rc.11</InformationalVersion>
     <ApplicationIcon>../../assets/clothesline.ico</ApplicationIcon><ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
   <ItemGroup>
@@ -22,6 +22,8 @@
     <PackageReference Include="Sdcb.SimdPaddleOCR.Models.ChineseV6Tiny" Version="1.0.0" />
     <PackageReference Include="Sdcb.SimdPaddleOCR.Models.TextLineOrientation" Version="1.0.0" />
     <Resource Include="../../assets/clothesline-icon.png" Link="icon.png" />
+    <!-- PicRope's basket pictures (MIT), pre-cropped and downscaled to ~45 KB each. -->
+    <Resource Include="Assets/PicRope/basket-*.png" />
     <Resource Include="Assets/ppocr-v6-tiny-dict.txt" />
     <Resource Include="Assets/ppocr-v6-full-dict.txt" />
     <None Include="../../LICENSE" Link="LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />

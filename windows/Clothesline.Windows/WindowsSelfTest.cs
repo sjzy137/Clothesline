@@ -61,6 +61,11 @@ internal static class WindowsSelfTest
             var holder=(Grid)((StackPanel)cards.Children[0]).Children[1];
             var buttons=holder.Children.OfType<StackPanel>().SelectMany(bar=>bar.Children.OfType<Button>()).ToList();
             if (buttons.Count!=2) throw new Exception("card is missing its pin and take-down buttons");
+            // The basket pendant is drawn from embedded pictures, one per theme. A broken resource path
+            // would silently fall back to the vector outline, so this is the only place it is caught.
+            var basketCheck="basket skins for all "+LineTheme.All.Length+" themes";
+            foreach (var ropeTheme in LineTheme.All)
+                if (BasketSkin.Source(ropeTheme) is null) throw new Exception("basket picture missing for theme "+ropeTheme.Id);
             // The move marker is the one thing that cannot be verified by reading the code. If it ever
             // stops reaching the clipboard as a DWORD, Ctrl+drag silently degrades to a copy.
             var movePayload=RopeWindow.FilePayload(file);
@@ -122,7 +127,7 @@ internal static class WindowsSelfTest
             var license=Path.Combine(AppContext.BaseDirectory,"LICENSE.txt");
             if (!File.ReadAllText(license).Contains("Alejandro")) throw new Exception("upstream MIT notice missing");
             if (!File.Exists(Native.Downloads()) && !Directory.Exists(Native.Downloads())) { /* Known folder may be uncreated on a fresh runner. */ }
-            File.WriteAllText(report,JsonSerializer.Serialize(new { passed=true, checks=new[] { "real file card", "safe dismissal", "file-drop payload", "WPF overlay construction", "card pin and take-down buttons", "ctrl-drag move marker", ocrCheck, "recycle bin move", hkCheck, v6Check, "image source lock released", "bundled MIT license" }, uiAcceptance=false }));
+            File.WriteAllText(report,JsonSerializer.Serialize(new { passed=true, checks=new[] { "real file card", "safe dismissal", "file-drop payload", "WPF overlay construction", "card pin and take-down buttons", basketCheck, "ctrl-drag move marker", ocrCheck, "recycle bin move", hkCheck, v6Check, "image source lock released", "bundled MIT license" }, uiAcceptance=false }));
             app.Shutdown(); return 0;
         }
         catch (Exception error)
