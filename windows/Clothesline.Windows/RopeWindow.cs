@@ -98,7 +98,7 @@ internal sealed partial class RopeWindow : Window
         PreviewDragOver += (_, e) => { e.Effects = settings.DropToHang && !selfDragging && e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None; e.Handled = true; };
         Drop += (_, e) => { if (settings.DropToHang && !selfDragging && e.Data.GetData(DataFormats.FileDrop) is string[] paths) Guard(() => Attach(paths)); e.Handled = true; };
         Loaded += (_, _) => Start();
-        Closed += (_, _) => { closing = true; if (handle != IntPtr.Zero) Native.UnregisterHotKey(handle, VisibilityHotKeyId); scanTimer.Stop(); pointerTimer.Stop(); foreach (var watcher in watchers) watcher.Dispose(); foreach (var w in deskWindows.Values) w.Close(); tray?.Dispose(); ClearClipboard(false, false); Application.Current.Shutdown(); };
+        Closed += (_, _) => { closing = true; if (handle != IntPtr.Zero) Native.UnregisterHotKey(handle, VisibilityHotKeyId); scanTimer.Stop(); pointerTimer.Stop(); Native.UninstallMouseHook(); foreach (var watcher in watchers) watcher.Dispose(); foreach (var w in deskWindows.Values) w.Close(); tray?.Dispose(); ClearClipboard(false, false); Application.Current.Shutdown(); };
     }
     private void Start()
     {
@@ -109,6 +109,7 @@ internal sealed partial class RopeWindow : Window
         tray.DoubleClick += (_, _) => { settings.AlwaysVisible = !settings.AlwaysVisible; Persist(); };
         RebuildWatchers();
         RegisterHotKey();
+        Native.InstallMouseHook();
         scanTimer.Tick += async (_, _) => { await Scan(); PollClipboard(); };
         pointerTimer.Tick += (_, _) => PollPointer();
         scanTimer.Start(); pointerTimer.Start(); _ = Scan();

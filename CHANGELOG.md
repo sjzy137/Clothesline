@@ -1,5 +1,11 @@
 # Changelog
 
+## 修复「拖文件到顶端自动接住」不生效 — 2026-10-29 (rc.9)
+
+- **根因**：拖拽检测依赖 `GetAsyncKeyState(VK_LBUTTON)` 判断左键是否按住；但资源管理器/桌面发起的 OLE 拖放中，跨进程查询常读不到「左键仍按下」，导致 `dragAtTop` 永远为假，绳子不会滑下接住，功能看似未实现。
+- **修复**：新增全局低级鼠标钩子（`Native.InstallMouseHook` / `UninstallMouseHook`，`WH_MOUSE_LL`），可靠感知左键按住状态（OLE 拖放期间低级钩子仍会收到按键事件）；`MousePressed` 改为 `钩子状态 || GetAsyncKeyState` 双保险。窗体生命周期内安装、退出时卸载。
+- 构建通过（0 警告 0 错误），self-test 12 项（含 `card pin and take-down buttons`）全通过（此前一次剪贴板占用报错为环境偶发，重跑通过）。
+
 ## 拖文件到顶端自动接住 + 全 UI 套用五主题 + 托盘菜单精简 — 2026-10-29 (rc.8)
 
 - **拖文件到屏幕顶端自动接住**：在 `PollPointer` 用**屏幕坐标**检测「左键按住 + 光标进入顶部 90px 区域」(`DragBand`)，无论任务栏在不在顶部、绳子窗口在哪，都能在文件到达折叠窄条之前就让绳子滑下接住；松手即挂（`DropToHang`）。放宽拖放命中区（`surface` / `cards` / 卡片 均设 `AllowDrop`），并用 `selfDragging` 标志避免卡片自身拖出时被同一根绳子重复挂上。绳子上滑/收起改用短动画（150/110ms 缓出），有「滑下来接住」的手感。

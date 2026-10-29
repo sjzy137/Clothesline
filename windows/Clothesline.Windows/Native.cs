@@ -37,7 +37,11 @@ internal static class Native
         return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
     }
     public static Point Cursor { get { GetCursorPos(out var p); return new Point(p.X,p.Y); } }
-    public static bool MousePressed => GetAsyncKeyState(1) < 0;
+    /// True while the left mouse button is held. A low-level hook carries the state reliably across
+    /// another program's OLE drag loop (e.g. dragging files out of Explorer), where GetAsyncKeyState
+    /// is often reported as released — without this the rope never knows a drag is heading for the top
+    /// and never slides down to catch it. GetAsyncKeyState remains as a fallback.
+    public static bool MousePressed => leftButtonDown || GetAsyncKeyState(1) < 0;
     public static void ClickThrough(Window window, bool enabled)
     {
         var hwnd = new WindowInteropHelper(window).Handle;
@@ -45,6 +49,46 @@ internal static class Native
         var old = GetWindowLong(hwnd, -20).ToInt64();
         var value = enabled ? old | 0x20 : old & ~0x20;
         if (old != value) SetWindowLong(hwnd, -20, new IntPtr(value));
+    }
+
+    // A global low-level mouse hook so we can reliably tell when the left button is held during a drag
+    // started by another program (Explorer / desktop). GetAsyncKeyState is unreliable across the OLE
+    // drag loop, so the rope would otherwise never learn a file is being dragged toward the top.
+    private delegate IntPtr MouseHookProc(int nCode, IntPtr wParam, IntPtr lParam);
+    private static MouseHookProc? mouseHookProc;
+    private static IntPtr mouseHookHandle;
+    private static volatile bool leftButtonDown;
+    private const int WhMouseLl = 14;
+    private const int WmLbuttondown = 0x0201;
+    private const int WmLbuttonup = 0x0202;
+    [DllImport("user32.dll", SetLastError = true)] private static extern IntPtr SetWindowsHookEx(int idHook, MouseHookProc lpfn, IntPtr hMod, uint dwThreadId);
+    [DllImport("user32.dll", SetLastError = true)] private static extern bool UnhookWindowsHookEx(IntPtr hhk);
+    [DllImport("user32.dll")] private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+    [DllImport("kernel32.dll", CharSet = CharSet.Auto)] private static extern IntPtr GetModuleHandle(string lpModuleName);
+
+    public static void InstallMouseHook()
+    {
+        if (mouseHookHandle != IntPtr.Zero) return;
+        mouseHookProc = HookCallback;
+        using var process = Process.GetCurrentProcess();
+        using var module = process.MainModule!;
+        mouseHookHandle = SetWindowsHookEx(WhMouseLl, mouseHookProc, GetModuleHandle(module.ModuleName), 0);
+    }
+    public static void UninstallMouseHook()
+    {
+        if (mouseHookHandle == IntPtr.Zero) return;
+        UnhookWindowsHookEx(mouseHookHandle);
+        mouseHookHandle = IntPtr.Zero; mouseHookProc = null;
+    }
+    private static IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
+    {
+        if (nCode >= 0)
+        {
+            var msg = (int)wParam;
+            if (msg == WmLbuttondown) leftButtonDown = true;
+            else if (msg == WmLbuttonup) leftButtonDown = false;
+        }
+        return CallNextHookEx(mouseHookHandle, nCode, wParam, lParam);
     }
     public static void Open(string path) => Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
     public static void Reveal(string path) => Process.Start(new ProcessStartInfo("explorer.exe", "/select,\"" + path + "\"") { UseShellExecute = true });
