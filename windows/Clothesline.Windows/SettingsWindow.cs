@@ -197,18 +197,56 @@ internal sealed partial class RopeWindow
             Hint(T("指针离开晾衣绳后等多久再收起。","How long the rope waits after the pointer leaves before sliding back up."))));
 
         // Summon dwell time: how long the pointer must linger at the top edge before the rope slides
-        // out. 0 reveals immediately on hover (the original behaviour); the slider goes up to 10 s.
-        var dwell = new Slider { Width = 240, HorizontalAlignment = HorizontalAlignment.Left, Minimum = 0, Maximum = 10000, TickFrequency = 500, SmallChange = 100, LargeChange = 1000 };
+        // out. 0 reveals immediately on hover (the original behaviour); the slider goes up to 10 s with
+        // a tick every second. A manual box lets the user type any value to 0.1 s precision.
+        var dwell = new Slider
+        {
+            Width = 240, HorizontalAlignment = HorizontalAlignment.Left,
+            Minimum = 0, Maximum = 10000, TickFrequency = 1000,
+            TickPlacement = System.Windows.Controls.Primitives.TickPlacement.BottomRight, IsSnapToTickEnabled = false,
+            SmallChange = 100, LargeChange = 1000
+        };
         dwell.Value = settings.RevealDwell;
         var dwellLabel = new TextBlock { FontSize = 12, Foreground = Brushes.DimGray, Margin = new Thickness(0, 3, 0, 0) };
-        void RefreshDwell() => dwellLabel.Text = settings.RevealDwell <= 0
-            ? T("0 秒（指针靠近立即滑出，保持原行为）","0 s (slides out on hover immediately, original behaviour)")
-            : (settings.RevealDwell / 1000.0).ToString("0.0") + T(" 秒"," s");
+        var dwellBox = new TextBox
+        {
+            Width = 64, HorizontalAlignment = HorizontalAlignment.Left,
+            HorizontalContentAlignment = HorizontalAlignment.Right, VerticalContentAlignment = VerticalAlignment.Center,
+            Text = (settings.RevealDwell / 1000.0).ToString("0.0", CultureInfo.InvariantCulture)
+        };
+        bool syncing = false;
+        void RefreshDwell()
+        {
+            dwellLabel.Text = settings.RevealDwell <= 0
+                ? T("0 秒（指针靠近立即滑出，保持原行为）","0 s (slides out on hover immediately, original behaviour)")
+                : (settings.RevealDwell / 1000.0).ToString("0.0", CultureInfo.InvariantCulture) + T(" 秒"," s");
+            if (!dwellBox.IsFocused) dwellBox.Text = (settings.RevealDwell / 1000.0).ToString("0.0", CultureInfo.InvariantCulture);
+        }
+        void ApplyDwell(int ms)
+        {
+            ms = Math.Clamp(ms, 0, 10000);
+            settings.RevealDwell = ms; Persist();
+            syncing = true; RefreshDwell(); syncing = false;
+        }
+        dwell.ValueChanged += (_, _) => { if (!syncing) ApplyDwell((int)Math.Round(dwell.Value)); };
+        dwellBox.TextChanged += (_, _) =>
+        {
+            if (syncing) return;
+            if (double.TryParse(dwellBox.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var sec))
+            {
+                sec = Math.Clamp(sec, 0, 10);
+                ApplyDwell((int)Math.Round(sec * 1000));
+                dwell.Value = settings.RevealDwell;
+            }
+        };
         RefreshDwell();
-        dwell.ValueChanged += (_, _) => { settings.RevealDwell = (int)Math.Round(dwell.Value); Persist(); RefreshDwell(); };
-        panel.Children.Add(Field(T("召唤停留时长","Summon dwell time"), dwell,
-            Hint(T("指针在屏幕最顶部停留多久，晾衣绳才滑出。0 表示贴顶即显；最大 10 秒，适合误触频繁时降低灵敏度。",
-              "How long the pointer must linger at the very top of the screen before the rope slides out. 0 reveals on hover; up to 10 s, useful when the edge is brushed by accident often."))));
+        var dwellRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+        dwellRow.Children.Add(dwell);
+        dwellRow.Children.Add(new TextBlock { Text = T("秒"," s"), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 4, 0), FontSize = 12, Foreground = Brushes.DimGray });
+        dwellRow.Children.Add(dwellBox);
+        panel.Children.Add(Field(T("召唤停留时长","Summon dwell time"), dwellRow,
+            Hint(T("指针在屏幕最顶部停留多久，晾衣绳才滑出。刻度每 1 秒一格（0–10 秒）；也可在右侧框内手动输入 0.0–10.0 秒（精确到 0.1 秒）。0 表示贴顶即显。",
+              "How long the pointer must linger at the very top of the screen before the rope slides out. Ticks mark every 1 s (0–10 s); you can also type 0.0–10.0 s (0.1 s precision) in the box. 0 reveals on hover."))));
         return panel;
     }
 
