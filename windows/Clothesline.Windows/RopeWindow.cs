@@ -42,6 +42,7 @@ internal sealed partial class RopeWindow : Window
     private readonly RopeState state = new();
     private readonly Dictionary<string, FileRecord> monitored = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, NoteEntry?> clipboardItems = new(StringComparer.OrdinalIgnoreCase);
+    private LineTheme CurrentTheme => LineTheme.FromId(settings.Appearance);
     private readonly HashSet<string> clipboardHashes = new();
     private readonly List<FileSystemWatcher> watchers = [];
     private readonly Canvas surface = new();
@@ -87,6 +88,7 @@ internal sealed partial class RopeWindow : Window
     }
     private void Start()
     {
+        Theme.Install();
         clipboardSequence = Native.GetClipboardSequenceNumber();
         tray = new Forms.NotifyIcon { Text = "Clothesline", Icon = System.Drawing.Icon.ExtractAssociatedIcon(Environment.ProcessPath!), Visible = true };
         var menu = new Forms.ContextMenuStrip(); menu.Opening += (_, _) => BuildTray(menu); tray.ContextMenuStrip = menu;
@@ -231,8 +233,10 @@ internal sealed partial class RopeWindow : Window
         cards.Children.Clear(); cardViews.Clear(); cardFlashes.Clear();
         foreach (var file in files) cards.Children.Add(CreateCard(file, cards.Children.Count));
         for (var i = surface.Children.Count - 1; i >= 0; i--) if (surface.Children[i] != cards) surface.Children.RemoveAt(i);
-        var rope = new System.Windows.Shapes.Path { Stroke = new SolidColorBrush(Color.FromRgb(165,182,195)), StrokeThickness = 2,
+        var theme = CurrentTheme;
+        var rope = new System.Windows.Shapes.Path {
             Data = new PathGeometry([new PathFigure(new Point(0,10), [new QuadraticBezierSegment(new Point(Width/2,32),new Point(Width,10),true)],false)]) };
+        RopeLine.Apply(rope, theme);
         surface.Children.Insert(0, rope);
         // Wheel scrolling keeps overflow and pinned cards reachable.
         cards.Width = double.NaN;
@@ -241,8 +245,9 @@ internal sealed partial class RopeWindow : Window
     private UIElement CreateCard(FileRecord file, int position)
     {
         var stack = new StackPanel { Width = 130, Margin = new Thickness(5,0,5,12) };
-        var colors = new[] { "#EF5B66", "#F5A623", "#52B77A", "#469EE0", "#9D75D5", "#E77AB0" };
-        stack.Children.Add(new Border { Width=8, Height=23, CornerRadius=new CornerRadius(3), Background=(Brush)new BrushConverter().ConvertFromString(colors[position%colors.Length])!, Margin=new Thickness(0,0,0,-7) });
+        var clip = new ClothesClip(CurrentTheme, position) { HorizontalAlignment = HorizontalAlignment.Center };
+        var clipBox = new Viewbox { Child = clip, Width = 13, Height = 24, Margin = new Thickness(0,0,0,-7), HorizontalAlignment = HorizontalAlignment.Center, IsHitTestVisible = false };
+        stack.Children.Add(clipBox);
         var body = new StackPanel();
         var missing = FileRecord.Read(file.Path) is null;
         var pinned = state.Pinned.Contains(file.Path);

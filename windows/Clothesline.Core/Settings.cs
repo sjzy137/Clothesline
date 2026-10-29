@@ -14,6 +14,9 @@ public sealed class Settings
     /// File names (inside the Notes folder) the user has favourited in the Text Envelope. Favourites
     /// survive restarts and are exempt from the one-week auto-deletion of un-favourited notes.
     public List<string> TextFavorites { get; set; } = [];
+    /// UI appearance theme id (PicRope-derived five themes: classic/linen/porcelain/color/graphite).
+    /// Persisted so the chosen rope+clip look survives restarts; falls back to "color".
+    public string Appearance { get; set; } = "color";
     public Dictionary<string, string> Dismissed { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public bool AlwaysVisible { get; set; }
     // On by default: screenshots and copied images land on the line without opting in.
@@ -70,6 +73,7 @@ public sealed class Settings
             // cannot tell it apart from someone having deliberately picked the Windows engine. Those
             // files are upgraded to the more accurate engine; an explicit choice is left alone.
             if (!JsonDocument.Parse(text).RootElement.TryGetProperty(nameof(OcrEngine), out _)) value.OcrEngine = "v6";
+            if (string.IsNullOrWhiteSpace(value.Appearance)) value.Appearance = "color";
             return value;
         }
         catch (JsonException)

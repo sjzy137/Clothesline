@@ -164,6 +164,7 @@ internal sealed partial class RopeWindow
         clipboard.DropDownItems.Add(TrayItem(T("自动挂上文字便签","Automatically Hang Text Notes"),()=> { settings.ClipboardText=!settings.ClipboardText; clipboardSequence=Native.GetClipboardSequenceNumber(); Persist(); },settings.ClipboardText));
         clipboard.DropDownItems.Add(TrayItem(T("清空剪贴板挂载内容","Clear Clipboard Items"),()=>ClearClipboard())); menu.Items.Add(clipboard);
         menu.Items.Add(TrayItem(T("文字信封…","Text Envelope…"),ShowTextEnvelope));
+        menu.Items.Add(TrayItem(T("外观…","Appearance…"),ShowAppearance));
         var capacity=new Forms.ToolStripMenuItem(T("保留数量","Items to Keep"));
         foreach (var number in new[] { 5,8,12,25,50 }) capacity.DropDownItems.Add(TrayItem(number.ToString(),()=> { settings.Capacity=number; Persist(); },settings.Capacity==number));
         menu.Items.Add(capacity);
@@ -193,6 +194,14 @@ internal sealed partial class RopeWindow
         languages.DropDownItems.Add(TrayItem("简体中文",()=> { settings.English=false; Persist(); },!settings.English));
         languages.DropDownItems.Add(TrayItem("English",()=> { settings.English=true; Persist(); },settings.English)); menu.Items.Add(languages);
         menu.Items.Add(new Forms.ToolStripSeparator()); menu.Items.Add(TrayItem(T("退出 Clothesline","Quit Clothesline"),Close));
+    }
+    private void ShowAppearance()
+    {
+        var window = new AppearanceWindow(LineTheme.FromId(settings.Appearance), theme => {
+            settings.Appearance = theme.Id; Persist(); signature = ""; Render();
+        });
+        window.Owner = this;
+        window.ShowDialog();
     }
     private void ShowRecent()
     {
