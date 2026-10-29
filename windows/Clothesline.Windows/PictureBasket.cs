@@ -274,7 +274,11 @@ internal sealed partial class RopeWindow
         rebuild();
         window.PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) window.Close(); };
         basketWindow = window;
-        window.Closed += (_, _) => { basketWindow = null; signature = ""; Render(); };
+        // The basket hangs off the rope like everything else here, so it goes away with it rather
+        // than floating over the desktop once the rope has tucked itself up.
+        void RopeGone() { if (window.IsVisible) window.Close(); }
+        RopeHidden += RopeGone;
+        window.Closed += (_, _) => { basketWindow = null; signature = ""; Render(); RopeHidden -= RopeGone; };
         window.Show();
     }
 

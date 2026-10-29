@@ -321,6 +321,47 @@ internal static class ThemeIcons
             StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round
         };
     }
+    /// 信封式的展开查看图标：一个向外的双箭头（对角展开）。
+    public static System.Windows.Shapes.Path Expand(LineTheme theme, double size = 10)
+    {
+        return new System.Windows.Shapes.Path {
+            Width = size, Height = size, Stretch = System.Windows.Media.Stretch.Uniform,
+            Data = Geometry.Parse("M0,4 L0,0 L4,0 M6,0 L10,0 L10,4 M10,6 L10,10 L6,10 M4,10 L0,10 L0,6"),
+            Stroke = Theme.Brush(theme.CardText), StrokeThickness = 1.3,
+            StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round, StrokeLineJoin = PenLineJoin.Round
+        };
+    }
+    /// 复制图标：叠放的两张纸。
+    public static System.Windows.Shapes.Path Copy(LineTheme theme, double size = 11)
+    {
+        return new System.Windows.Shapes.Path {
+            Width = size, Height = size, Stretch = System.Windows.Media.Stretch.Uniform,
+            Data = Geometry.Parse("M3.2,3.2 L3.2,11 L9.8,11 M1,9 L1,1 L7.6,1 L7.6,3.2 M3.2,3.2 L7.6,3.2 L7.6,8.8 L9.8,8.8 M1,1 L3.2,3.2 L3.2,8.8 L1,8.8 Z"),
+            Stroke = Theme.Brush(theme.CardText), StrokeThickness = 1.2,
+            StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round, StrokeLineJoin = PenLineJoin.Round
+        };
+    }
+    /// 删除图标：垃圾桶。
+    public static System.Windows.Shapes.Path Trash(LineTheme theme, double size = 11)
+    {
+        return new System.Windows.Shapes.Path {
+            Width = size, Height = size, Stretch = System.Windows.Media.Stretch.Uniform,
+            Data = Geometry.Parse("M1.5,3 L9.5,3 M3.5,3 L3.5,1.5 L7.5,1.5 L7.5,3 M2.8,3 L3.2,10 L7.8,10 L8.2,3 M4.4,5 L4.6,8.6 M6.4,5 L6.2,8.6"),
+            Stroke = Theme.Brush(theme.CardText), StrokeThickness = 1.2,
+            StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round, StrokeLineJoin = PenLineJoin.Round
+        };
+    }
+    /// 收藏图标：五角星。收藏时为实心，未收藏时仅描边。
+    public static System.Windows.Shapes.Path Star(LineTheme theme, bool filled, double size = 12)
+    {
+        return new System.Windows.Shapes.Path {
+            Width = size, Height = size, Stretch = System.Windows.Media.Stretch.Uniform,
+            Data = Geometry.Parse("M6,0.6 L7.6,4.2 L11.6,4.6 L8.6,7.2 L9.5,11.2 L6,9.2 L2.5,11.2 L3.4,7.2 L0.4,4.6 L4.4,4.2 Z"),
+            Stroke = Theme.Brush(theme.CardText), StrokeThickness = 1.1,
+            Fill = filled ? Theme.Brush(theme.Accent) : System.Windows.Media.Brushes.Transparent,
+            StrokeLineJoin = PenLineJoin.Round
+        };
+    }
     public static System.Windows.Shapes.Path DeskPin(LineTheme theme)
     {
         // 工字钉轮廓：钉帽 + 针身。

@@ -126,8 +126,37 @@ internal static class WindowsSelfTest
 
             var license=Path.Combine(AppContext.BaseDirectory,"LICENSE.txt");
             if (!File.ReadAllText(license).Contains("Alejandro")) throw new Exception("upstream MIT notice missing");
+
+            // The hover preview is placed entirely by arithmetic, and the one failure mode that reads
+            // as a broken feature rather than a crash is a preview that lands off-screen or upside
+            // down. Feeding it a 4K picture under a card near the bottom edge covers both: the size
+            // has to clamp to what fits, and the fallback has to flip above the anchor.
+            var anchor=new Rect(600, 40, 130, 130);
+            var displayArea=new Rect(0, 0, 1280, 720);
+            var previewSize=HoverPreview.PreviewSize(3840, 2160, anchor, displayArea);
+            if (previewSize.Width<1 || previewSize.Height<1) throw new Exception("preview collapsed to nothing");
+            if (previewSize.Width>640+1 || previewSize.Height>480+1) throw new Exception("preview exceeded its cap: "+previewSize);
+            var placed=HoverPreview.Place(anchor, displayArea, previewSize.Width+48, previewSize.Height+48);
+            if (placed.Left<displayArea.Left || placed.Top<displayArea.Top) throw new Exception("preview landed above or left of the screen");
+            if (placed.Right>displayArea.Right+1 || placed.Bottom>displayArea.Bottom+1) throw new Exception("preview landed off-screen");
+            var lowAnchor=new Rect(600, 620, 130, 130);
+            var above=HoverPreview.Place(lowAnchor, displayArea, 300, 200);
+            if (above.Bottom>lowAnchor.Top) throw new Exception("preview did not flip above a card near the bottom edge");
+            var previewCheck="hover preview stays on screen (for an oversized picture)";
+
+            // Which monitor the rope picks lives in one place, and getting it wrong leaves the rope
+            // on a screen nobody is looking at. An unknown pinned device must fall back rather than
+            // crash, which is what happens when a monitor is unplugged between runs.
+            var here=typeof(RopeWindow).GetMethod("ResolveScreen",BindingFlags.NonPublic|BindingFlags.Instance)!;
+            settings.Display="\\\\.\\DISPLAY99";
+            if (here.Invoke(window,new object[] { new Point(1,1) }) is not System.Windows.Forms.Screen fallback) throw new Exception("a missing monitor left the rope nowhere");
+            settings.Display="";
+            if (here.Invoke(window,new object[] { new Point(1,1) }) is not System.Windows.Forms.Screen followed) throw new Exception("following the pointer found no screen");
+            if (fallback.WorkingArea.Width<=0 || followed.WorkingArea.Width<=0) throw new Exception("the chosen screen has no usable work area");
+            var screenCheck="rope resolves a display even without the pinned monitor";
             if (!File.Exists(Native.Downloads()) && !Directory.Exists(Native.Downloads())) { /* Known folder may be uncreated on a fresh runner. */ }
-            File.WriteAllText(report,JsonSerializer.Serialize(new { passed=true, checks=new[] { "real file card", "safe dismissal", "file-drop payload", "WPF overlay construction", "card pin and take-down buttons", basketCheck, "ctrl-drag move marker", ocrCheck, "recycle bin move", hkCheck, v6Check, "image source lock released", "bundled MIT license" }, uiAcceptance=false }));
+            File.WriteAllText(report,JsonSerializer.Serialize(new { passed=true, checks=new[] { "real file card", "safe dismissal", "file-drop payload", "WPF overlay construction", "card pin and take-down buttons", basketCheck, "ctrl-drag move marker", ocrCheck, "recycle bin move", hkCheck, v6Check, "image source lock released",
+                previewCheck, screenCheck, "bundled MIT license" }, uiAcceptance=false }));
             app.Shutdown(); return 0;
         }
         catch (Exception error)

@@ -70,6 +70,11 @@ public sealed class Settings
     /// How long the pointer must stay in the top-edge trigger zone before the rope slides out, in
     /// milliseconds. 0 reveals immediately on hover (the original behaviour). Range 0–10000 ms.
     public int RevealDwell { get; set; } = 0;
+    /// Which monitor the rope hangs on. Empty follows the pointer; otherwise a Win32 device name
+    /// ("\\.\DISPLAY2") pins it to one screen.
+    public string Display { get; set; } = "";
+    /// Enlarge a picture card under the rope while the pointer rests on it.
+    public bool HoverPreview { get; set; } = true;
     /// The global hot key that toggles the rope, written as "Ctrl+Alt+Up". Empty disables it
     /// regardless of HotKeyEnabled. The WPF key name is preserved so it round-trips through
     /// Native.TryParseHotKey; only registered when HotKeyEnabled is also true.

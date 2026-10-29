@@ -9,6 +9,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using Clothesline.Core;
+using Forms = System.Windows.Forms;
 using Microsoft.Win32;
 
 namespace Clothesline.Windows;
@@ -341,6 +342,34 @@ internal sealed partial class RopeWindow
         panel.Children.Add(Field(T("外观主题","Appearance theme"), themeRow,
             Hint(T("绳子与夹子整套切换：经典银灰 / 棉麻木夹 / 奶白轻盈 / 柔彩日常 / 石墨金属。",
                  "Switches the rope and clips as a set: Classic Silver / Linen Woodclip / Porcelain Light / Soft Daily / Graphite Metal."))));
+
+        // Which monitor the rope hangs on. One rope cannot be in two places, so this is a choice of
+        // exactly one home: follow the pointer, or stay on a screen that never changes.
+        var screenBox = new ComboBox { Width = 300, HorizontalAlignment = HorizontalAlignment.Left };
+        screenBox.Items.Add(T("跟随鼠标指针","Follow the pointer"));
+        var screenNames = new List<string> { "" };
+        foreach (var screen in Forms.Screen.AllScreens)
+        {
+            var label = screen.DeviceName + "  (" + screen.Bounds.Width + "×" + screen.Bounds.Height + ")" + (screen.Primary ? T(" • 主屏幕"," • primary") : "");
+            screenBox.Items.Add(label);
+            screenNames.Add(screen.DeviceName);
+        }
+        var screenIndex = screenNames.IndexOf(settings.Display);
+        screenBox.SelectedIndex = screenIndex >= 0 ? screenIndex : 0;
+        screenBox.SelectionChanged += (_, _) =>
+        {
+            if (screenBox.SelectedIndex < 0) return;
+            settings.Display = screenNames[screenBox.SelectedIndex]; Persist();
+            PlaceOnScreen(ResolveScreen(Native.Cursor));
+        };
+        panel.Children.Add(Field(T("显示屏幕","Display screen"), screenBox,
+            Hint(T("有多块屏幕时，晾衣绳挂在哪一块。「跟随鼠标指针」会在指针走到另一块屏幕时把绳子带过去。",
+                 "With more than one monitor: which one the clothesline hangs on. \"Follow the pointer\" carries the rope over to whichever screen you move to."))));
+
+        panel.Children.Add(Toggle(T("鼠标悬停时放大预览图片","Enlarge pictures on hover"),
+            T("把指针停在图片卡片上，稍等即在卡片下方弹出放大预览，不影响对卡片本身的点击与拖拽。",
+              "Rest the pointer on a picture card and a larger copy opens beneath it. Clicks and drags still reach the card itself."),
+            settings.HoverPreview, value => { settings.HoverPreview = value; Persist(); if (hoverPreview is not null) hoverPreview.Enabled = value; }));
         return panel;
     }
 

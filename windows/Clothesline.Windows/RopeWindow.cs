@@ -76,6 +76,10 @@ internal sealed partial class RopeWindow : Window
     private readonly DispatcherTimer animTimer = new() { Interval = TimeSpan.FromMilliseconds(33) };
     private double windPhase;
     private Window? settingsWindow;
+    /// Raised when the rope tucks itself away. Windows hanging off it (text envelope, picture basket)
+    /// listen so they close instead of floating over nothing.
+    internal event Action? RopeHidden;
+    private HoverPreview? hoverPreview;
     private readonly Dictionary<string, PinWindow> deskWindows = [];
     private DispatcherTimer? clickTimer;
     private IntPtr handle;
@@ -87,8 +91,16 @@ internal sealed partial class RopeWindow : Window
         foreach (var pair in settings.Dismissed) state.Dismissed[pair.Key] = pair.Value;
         foreach (var path in settings.Pins) state.Pinned.Add(path);
         foreach (var path in settings.DeskPins) state.DeskPins.Add(path);
-        Title = "Clothesline"; Width = SystemParameters.WorkArea.Width; Height = CollapsedHeight;
-        Left = SystemParameters.WorkArea.Left; Top = SystemParameters.WorkArea.Top;
+        Title = "Clothesline"; Height = CollapsedHeight;
+        // Pick the starting screen before the first frame so the rope never appears on the primary
+        // and then jumps. Done inline rather than through PlaceOnScreen because the card row does not
+        // exist yet, and a render this early has nothing to draw with.
+        currentScreen = ResolveScreen(Native.Cursor);
+        var opening = currentScreen.WorkingArea;
+        var scale = Native.MonitorScale(currentScreen);
+        if (scale <= 0) scale = 1;
+        // Forms.Screen measures in pixels; a WPF window is sized in device-independent units.
+        Width = opening.Width / scale; Left = opening.Left / scale; Top = opening.Top / scale;
         WindowStyle = WindowStyle.None; ResizeMode = ResizeMode.NoResize; AllowsTransparency = true;
         Background = Brushes.Transparent; Topmost = true; ShowInTaskbar = false; ShowActivated = false;
         Icon = BitmapFrame.Create(new Uri("pack://application:,,,/icon.png"));
@@ -103,8 +115,38 @@ internal sealed partial class RopeWindow : Window
         PreviewDragOver += (_, e) => { e.Effects = settings.DropToHang && !selfDragging && e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None; e.Handled = true; };
         Drop += (_, e) => { if (settings.DropToHang && !selfDragging && e.Data.GetData(DataFormats.FileDrop) is string[] paths) Guard(() => Attach(paths)); e.Handled = true; };
         Loaded += (_, _) => Start();
-        Closed += (_, _) => { closing = true; if (handle != IntPtr.Zero) Native.UnregisterHotKey(handle, VisibilityHotKeyId); scanTimer.Stop(); pointerTimer.Stop(); animTimer.Stop(); Native.UninstallMouseHook(); foreach (var watcher in watchers) watcher.Dispose(); foreach (var w in deskWindows.Values) w.Close(); tray?.Dispose(); ClearClipboard(false, false); Application.Current.Shutdown(); };
+        Closed += (_, _) => { closing = true; if (handle != IntPtr.Zero) Native.UnregisterHotKey(handle, VisibilityHotKeyId); scanTimer.Stop(); pointerTimer.Stop(); animTimer.Stop(); Native.UninstallMouseHook(); hoverPreview?.Dispose(); foreach (var watcher in watchers) watcher.Dispose(); foreach (var w in deskWindows.Values) w.Close(); tray?.Dispose(); ClearClipboard(false, false); Application.Current.Shutdown(); };
     }
+    // ---- Multiple monitors ---------------------------------------------------
+    /// Which monitor the rope currently hangs on. Default behaviour follows the pointer, like
+    /// PicRope; the setting pins it to one screen for people who always work on the same monitor.
+    private Forms.Screen currentScreen;
+    private Forms.Screen ResolveScreen(Point cursor)
+    {
+        if (!string.IsNullOrEmpty(settings.Display))
+        {
+            var pinned = Forms.Screen.AllScreens.FirstOrDefault(s => string.Equals(s.DeviceName, settings.Display, StringComparison.OrdinalIgnoreCase));
+            if (pinned is not null) return pinned;
+        }
+        return Forms.Screen.FromPoint(new System.Drawing.Point((int)cursor.X, (int)cursor.Y));
+    }
+    /// Moves the rope onto another monitor. Width, left and top all come from that screen's work area,
+    /// so a portrait monitor beside a landscape one still gets a rope of exactly its width.
+    private void PlaceOnScreen(Forms.Screen screen)
+    {
+        currentScreen = screen;
+        var area = screen.WorkingArea;
+        var scale = Native.MonitorScale(screen);
+        if (scale <= 0) scale = 1;
+        // Forms.Screen measures in pixels while a WPF window is sized in device-independent units, so
+        // every value has to be divided by the monitor scale or the rope overshoots on a HiDPI screen.
+        Width = area.Width / scale; Left = area.Left / scale; Top = area.Top / scale;
+        scrollOffset = 0;
+        // The card row is laid out against the rope's width, so it has to be rebuilt to fit the new one.
+        signature = ""; Render();
+    }
+    internal Forms.Screen CurrentScreen() => currentScreen;
+
     private void Start()
     {
         Theme.Install();
@@ -120,6 +162,7 @@ internal sealed partial class RopeWindow : Window
         scanTimer.Start(); pointerTimer.Start(); animTimer.Tick += (_, _) => SwayStep(); animTimer.Start(); _ = Scan();
         ReopenDeskPins();
         LoadNotes();
+        hoverPreview = new HoverPreview(this); hoverPreview.Enabled = settings.HoverPreview;
     }
     private void RegisterHotKey()
     {
@@ -252,6 +295,9 @@ internal sealed partial class RopeWindow : Window
         var files = state.Select(Records(), settings.Capacity);
         var key = settings.English + ":" + Width + string.Join("|", files.Select(f => f.Path + f.Fingerprint + state.Pinned.Contains(f.Path) + (FileRecord.Read(f.Path) is null))) + clipboardItems.Count + ":" + settings.Appearance + ":" + settings.Pictures.Count;
         if (signature == key) return; signature = key;
+        // The cards being previewed are about to be replaced by new ones, so anything holding onto
+        // them — including the hover preview — has to let go first.
+        hoverPreview?.Dismiss();
         cards.Children.Clear(); cardViews.Clear(); cardFlashes.Clear();
         foreach (var file in files) cards.Children.Add(CreateCard(file, cards.Children.Count));
         for (var i = surface.Children.Count - 1; i >= 0; i--) if (surface.Children[i] != cards) surface.Children.RemoveAt(i);
@@ -356,8 +402,15 @@ internal sealed partial class RopeWindow : Window
             });
         };
         card.ContextMenu = CardMenu(file);
-        card.ContextMenuOpening += (_,_) => { CancelPendingClick(); busy=true; };
+        card.ContextMenuOpening += (_,_) => { CancelPendingClick(); busy=true; hoverPreview?.Dismiss(); };
         card.ContextMenuClosing += (_,_) => { busy=false; signature=""; Dispatcher.BeginInvoke(new Action(Render)); };
+        // Hovering a picture card enlarges it underneath the rope. Only pictures: a text card already
+        // shows enough of itself to read, and blowing it up would hide its neighbours for nothing.
+        if (note is null && IsImage(file.Path) && !file.IsDirectory)
+        {
+            card.MouseEnter += (_, _) => hoverPreview?.Enter(card, file.Path);
+            card.MouseLeave += (_, _) => hoverPreview?.Leave(card);
+        }
         cardViews.Add(card); cardFlashes[file.Path]=flash; return stack;
     }
 
@@ -521,7 +574,13 @@ internal sealed partial class RopeWindow : Window
     {
         if (busy) return;
         var cursor = Native.Cursor;
-        var screen = Forms.Screen.FromPoint(new System.Drawing.Point((int)cursor.X, (int)cursor.Y));
+        // With several monitors the rope belongs to the selected screen rather than always the
+        // primary: by default the one under the pointer, so walking between screens takes the rope
+        // along exactly like PicRope. Everything below — the top strip, the drag band, full-screen
+        // detection — is then measured against that screen instead of whichever one Windows calls
+        // primary, which is what made the rope impossible to summon on a second monitor.
+        var screen = ResolveScreen(cursor);
+        if (!screen.Equals(currentScreen)) PlaceOnScreen(screen);
         bool down = Native.MousePressed;
         // Top-edge summon zone in SCREEN coordinates: from the very top of the monitor, through any top
         // taskbar, plus a few pixels into the work area. Robust regardless of where the rope window
@@ -604,6 +663,9 @@ internal sealed partial class RopeWindow : Window
         if (shown != revealed)
         {
             revealed = shown;
+            // A preview of a card that is about to be tucked away would float over nothing, and a
+            // window hanging off the rope has nothing left to point at.
+            if (!shown) { hoverPreview?.Dismiss(); RopeHidden?.Invoke(); }
             var target = shown ? RevealHeight : CollapsedHeight;
             // 弹簧式滑出：轻微过冲带回弹，对应 PicRope 的 revealMotion 手感（CubicEase 只是减速，无回弹）。
             if (PresentationSource.FromVisual(this) is not null)
