@@ -115,7 +115,7 @@ internal sealed partial class RopeWindow
     {
         Validate(file);
         var isRtf = clipboardItems.TryGetValue(file.Path, out var note) && note is not null && note.IsRtf;
-        var window = new Window { Title = T("文字便签", "Text Note"), Width = 640, Height = 540, Owner = this, WindowStartupLocation = WindowStartupLocation.CenterScreen };
+        var window = new Window { Title = T("文字便签", "Text Note"), Width = 640, Height = 540, Owner = this, WindowStartupLocation = WindowStartupLocation.CenterScreen, Background = Theme.Brush(CurrentTheme.CardSurface) };
         var panel = new DockPanel { Margin = new Thickness(14) };
         var rtb = new RichTextBox { IsReadOnly = true, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new Thickness(0) };
         DockPanel.SetDock(rtb, Dock.Top); panel.Children.Add(rtb);
@@ -136,7 +136,7 @@ internal sealed partial class RopeWindow
     /// The Text Envelope: every collected note in one searchable list, with view / copy / favourite.
     private void ShowTextEnvelope()
     {
-        var window = new Window { Title = T("文字信封", "Text Envelope"), Width = 660, Height = 540, Owner = this, WindowStartupLocation = WindowStartupLocation.CenterScreen };
+        var window = new Window { Title = T("文字信封", "Text Envelope"), Width = 660, Height = 540, Owner = this, WindowStartupLocation = WindowStartupLocation.CenterScreen, Background = Theme.Brush(CurrentTheme.CardSurface) };
         var panel = new DockPanel { Margin = new Thickness(15) };
         var search = new TextBox { Margin = new Thickness(0, 0, 0, 10), ToolTip = T("搜索文字内容", "Search note text") };
         DockPanel.SetDock(search, Dock.Top); panel.Children.Add(search);
@@ -155,11 +155,11 @@ internal sealed partial class RopeWindow
                     !note.Plain.Contains(q, StringComparison.OrdinalIgnoreCase) &&
                     !title.Contains(q, StringComparison.OrdinalIgnoreCase)) continue;
                 var row = new DockPanel { Width = 580, ToolTip = path };
-                var view = new Button { Content = T("查看", "View"), Padding = new Thickness(10, 3, 10, 3) };
+                var view = new Button { Content = T("查看", "View"), Padding = new Thickness(10, 3, 10, 3), Style = Theme.ButtonStyle };
                 view.Click += (_, _) => Guard(() => { var fr = FileRecord.Read(path); if (fr is not null) ShowTextNote(fr); });
-                var copy = new Button { Content = T("复制", "Copy"), Padding = new Thickness(10, 3, 10, 3), Margin = new Thickness(6, 0, 0, 0) };
+                var copy = new Button { Content = T("复制", "Copy"), Padding = new Thickness(10, 3, 10, 3), Margin = new Thickness(6, 0, 0, 0), Style = Theme.ButtonStyle };
                 copy.Click += (_, _) => Guard(() => { var fr = FileRecord.Read(path); if (fr is not null) CopyText(fr); });
-                var fav = new Button { Content = IsFavorite(path) ? T("取消收藏", "Unfavorite") : T("收藏", "Favorite"), Padding = new Thickness(10, 3, 10, 3), Margin = new Thickness(6, 0, 0, 0) };
+                var fav = new Button { Content = IsFavorite(path) ? T("取消收藏", "Unfavorite") : T("收藏", "Favorite"), Padding = new Thickness(10, 3, 10, 3), Margin = new Thickness(6, 0, 0, 0), Style = Theme.ButtonStyle };
                 fav.Click += (_, _) => { ToggleFavorite(path); Populate(); };
                 DockPanel.SetDock(view, Dock.Right); row.Children.Add(view);
                 DockPanel.SetDock(copy, Dock.Right); row.Children.Add(copy);

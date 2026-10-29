@@ -7,7 +7,7 @@
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <UseWPF>true</UseWPF><UseWindowsForms>true</UseWindowsForms><EnableWindowsTargeting>true</EnableWindowsTargeting>
     <ImplicitUsings>disable</ImplicitUsings><Nullable>enable</Nullable><LangVersion>12</LangVersion>
-    <AssemblyName>Clothesline</AssemblyName><Version>0.1.0</Version><InformationalVersion>0.1.0-windows-rc.7</InformationalVersion>
+    <AssemblyName>Clothesline</AssemblyName><Version>0.1.0</Version><InformationalVersion>0.1.0-windows-rc.8</InformationalVersion>
     <ApplicationIcon>../../assets/clothesline.ico</ApplicationIcon><ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
   <ItemGroup>

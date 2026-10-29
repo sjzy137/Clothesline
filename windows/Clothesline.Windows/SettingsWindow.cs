@@ -244,9 +244,18 @@ internal sealed partial class RopeWindow
         dwellRow.Children.Add(dwell);
         dwellRow.Children.Add(new TextBlock { Text = T("秒"," s"), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 4, 0), FontSize = 12, Foreground = Brushes.DimGray });
         dwellRow.Children.Add(dwellBox);
-        panel.Children.Add(Field(T("召唤停留时长","Summon dwell time"), dwellRow,
-            Hint(T("指针在屏幕最顶部停留多久，晾衣绳才滑出。刻度每 1 秒一格（0–10 秒）；也可在右侧框内手动输入 0.0–10.0 秒（精确到 0.1 秒）。0 表示贴顶即显。",
-              "How long the pointer must linger at the very top of the screen before the rope slides out. Ticks mark every 1 s (0–10 s); you can also type 0.0–10.0 s (0.1 s precision) in the box. 0 reveals on hover."))));
+        // Numeric labels under each tick so the scale reads at a glance. The slider track is inset by
+        // about half a thumb on each side, so the label row is inset to match.
+        var dwellStack = new StackPanel { Orientation = Orientation.Vertical, Margin = new Thickness(0, 0, 0, 0) };
+        dwellStack.Children.Add(dwellRow);
+        var dwellTicks = new Grid { Width = 240, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(6, 1, 6, 0) };
+        for (var t = 0; t <= 10; t++) dwellTicks.ColumnDefinitions.Add(new ColumnDefinition());
+        for (var s = 0; s <= 10; s++)
+            dwellTicks.Children.Add(new TextBlock { Text = s.ToString(), FontSize = 10, Foreground = Brushes.Gray, HorizontalAlignment = HorizontalAlignment.Center });
+        dwellStack.Children.Add(dwellTicks);
+        panel.Children.Add(Field(T("召唤停留时长","Summon dwell time"), dwellStack,
+            Hint(T("指针在屏幕最顶部停留多久，晾衣绳才滑出。刻度每 1 秒一格（0–10 秒，下方已标数字）；也可在右侧框内手动输入 0.0–10.0 秒（精确到 0.1 秒）。0 表示贴顶即显。",
+              "How long the pointer must linger at the very top of the screen before the rope slides out. Ticks mark every 1 s (0–10 s, labelled below); you can also type 0.0–10.0 s (0.1 s precision) in the box. 0 reveals on hover."))));
         return panel;
     }
 
@@ -414,6 +423,13 @@ internal sealed partial class RopeWindow
         var clear = new Button { Content = T("清空剪贴板挂载内容","Clear clipboard items"), HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 8, 0, 0), Padding = new Thickness(16, 5, 16, 5) };
         clear.Click += (_, _) => Guard(() => { ClearClipboard(); refresh(); });
         panel.Children.Add(clear);
+
+        // The Text Envelope collects every clipboard text note; reaching it from the settings keeps the
+        // tray menu free of yet another item.
+        var envelope = new Button { Content = T("打开文字信封…","Open Text Envelope…"), HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 4, 0, 0), Padding = new Thickness(16, 5, 16, 5) };
+        envelope.Click += (_, _) => ShowTextEnvelope();
+        panel.Children.Add(Field(T("文字信封","Text Envelope"), envelope,
+            Hint(T("查看、复制或收藏所有已收集的文字便签。","View, copy, or favourite every collected text note."))));
         return panel;
     }
 

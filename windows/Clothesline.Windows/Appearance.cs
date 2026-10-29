@@ -78,26 +78,30 @@ internal static class Theme
     }
 }
 
-/// <summary>一套外观：绳子颜色/高光/粗细 + 夹子配色。对应 PicRope 的五套主题。</summary>
+/// <summary>一套外观：绳子颜色/高光/粗细 + 夹子配色 + 卡片调色板。对应 PicRope 的五套主题。</summary>
 internal sealed class LineTheme
 {
     public readonly string Id, Name, Description;
     public readonly string RopeColor, RopeHighlight;
     public readonly double RopeWidth;
     public readonly string[] ClipColors;
+    // Card / UI palette derived from the rope's mood so the whole surface stays in one family.
+    public readonly string CardSurface, CardBorder, CardText, Accent, NotePaper;
 
-    LineTheme(string id, string name, string description, string rope, string highlight, double width, params string[] colors)
+    LineTheme(string id, string name, string description, string rope, string highlight, double width,
+        string cardSurface, string cardBorder, string cardText, string accent, string note, params string[] colors)
     {
         Id = id; Name = name; Description = description;
         RopeColor = rope; RopeHighlight = highlight; RopeWidth = width; ClipColors = colors;
+        CardSurface = cardSurface; CardBorder = cardBorder; CardText = cardText; Accent = accent; NotePaper = note;
     }
 
     public static readonly LineTheme[] All = {
-        new LineTheme("classic", "经典银灰", "细灰钢索 · 银灰窄夹", "#8A96A7", "#C8CFD8", 1.6, "#DCE3EC"),
-        new LineTheme("linen", "棉麻木夹", "天然棉绳 · 浅榉木夹", "#BAA58A", "#EBDFC9", 2.3, "#DFC5A3"),
-        new LineTheme("porcelain", "奶白轻盈", "白色编织线 · 奶白夹", "#AEB1B0", "#F3F0E8", 1.9, "#F3F0E8"),
-        new LineTheme("color", "柔彩日常", "浅灰棉线 · 柔彩夹", "#A8ACAA", "#DADCD8", 1.9, "#A6BBA1", "#DCAAAA", "#F1D490"),
-        new LineTheme("graphite", "石墨金属", "炭灰钢索 · 石墨窄夹", "#565D64", "#949BA3", 1.65, "#575E66")
+        new LineTheme("classic", "经典银灰", "细灰钢索 · 银灰窄夹", "#8A96A7", "#C8CFD8", 1.6, "#F7F9FB", "#DDE3EA", "#3A4350", "#5B6B7E", "#EEF1F4", "#DCE3EC"),
+        new LineTheme("linen", "棉麻木夹", "天然棉绳 · 浅榉木夹", "#BAA58A", "#EBDFC9", 2.3, "#FBF8F2", "#ECE2D2", "#4A4338", "#B0936F", "#F3EBDD", "#DFC5A3"),
+        new LineTheme("porcelain", "奶白轻盈", "白色编织线 · 奶白夹", "#AEB1B0", "#F3F0E8", 1.9, "#FCFCFB", "#E8E9E6", "#3E4140", "#8F9290", "#F2F2EF", "#F3F0E8"),
+        new LineTheme("color", "柔彩日常", "浅灰棉线 · 柔彩夹", "#A8ACAA", "#DADCD8", 1.9, "#F7F9F6", "#E2E7DF", "#39423A", "#7E9A78", "#EEF3E9", "#A6BBA1", "#DCAAAA", "#F1D490"),
+        new LineTheme("graphite", "石墨金属", "炭灰钢索 · 石墨窄夹", "#565D64", "#949BA3", 1.65, "#F2F4F6", "#D2D7DC", "#33393F", "#4C545C", "#E7EAEE", "#575E66")
     };
 
     public static LineTheme FromId(string id) => Array.Find(All, theme => theme.Id == id) ?? All[3];

@@ -22,7 +22,7 @@ internal sealed partial class PinWindow : Window
     private double baseWidth;
     private double baseHeight;
 
-    internal PinWindow(FileRecord file, Action<string> onDismiss)
+    internal PinWindow(FileRecord file, LineTheme theme, Action<string> onDismiss)
     {
         var work = SystemParameters.WorkArea;
         // ~1/8 of the desktop by area → side ≈ 0.35 of the smaller screen dimension.
@@ -47,7 +47,9 @@ internal sealed partial class PinWindow : Window
         var border = new Border
         {
             Child = image,
-            Background = Brushes.White,
+            Background = Theme.Brush(theme.CardSurface),
+            BorderBrush = Theme.Brush(theme.CardBorder),
+            BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(8),
             Padding = new Thickness(6),
             Effect = new DropShadowEffect { BlurRadius = 16, ShadowDepth = 4, Opacity = .28 }
@@ -58,7 +60,7 @@ internal sealed partial class PinWindow : Window
             Content = "收回",
             FontSize = 11,
             Foreground = Brushes.White,
-            Background = new SolidColorBrush(Color.FromRgb(64, 72, 82)),
+            Background = Theme.Brush(theme.Accent),
             BorderThickness = new Thickness(0),
             Padding = new Thickness(8, 2, 8, 2),
             Cursor = Cursors.Hand,

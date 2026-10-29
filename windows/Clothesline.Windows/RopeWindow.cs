@@ -14,6 +14,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Effects;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
@@ -55,6 +56,9 @@ internal sealed partial class RopeWindow : Window
     private double scrollOffset;
     private uint clipboardSequence;
     private bool revealed;
+    // True while a card is being dragged out by the user, so the rope does not re-attach the same file
+    // to itself when the drag is released back over the rope.
+    private bool selfDragging;
     private DateTime edgeSince = DateTime.MaxValue;
     private DateTime awaySince = DateTime.MaxValue;
     private bool avoidingCaption;
@@ -62,6 +66,10 @@ internal sealed partial class RopeWindow : Window
     /// pixels into the work area that triggers the rope. In screen coordinates so it works no matter
     /// where the rope window sits — the robust half of PicRope's reveal logic.
     private const int TriggerBand = 10;
+    /// A held-button drag entering this top screen band (in SCREEN coordinates) makes the rope slide
+    /// down to catch the drop, well before the collapsed strip could be reached. This is the
+    /// "drag a file to the top of the screen" gesture from Explorer / the desktop.
+    private const int DragBand = 90;
     private Window? settingsWindow;
     private readonly Dictionary<string, PinWindow> deskWindows = [];
     private DispatcherTimer? clickTimer;
@@ -74,7 +82,7 @@ internal sealed partial class RopeWindow : Window
         foreach (var pair in settings.Dismissed) state.Dismissed[pair.Key] = pair.Value;
         foreach (var path in settings.Pins) state.Pinned.Add(path);
         foreach (var path in settings.DeskPins) state.DeskPins.Add(path);
-        Title = "Clothesline"; Width = SystemParameters.WorkArea.Width; Height = RevealHeight;
+        Title = "Clothesline"; Width = SystemParameters.WorkArea.Width; Height = CollapsedHeight;
         Left = SystemParameters.WorkArea.Left; Top = SystemParameters.WorkArea.Top;
         WindowStyle = WindowStyle.None; ResizeMode = ResizeMode.NoResize; AllowsTransparency = true;
         Background = Brushes.Transparent; Topmost = true; ShowInTaskbar = false; ShowActivated = false;
@@ -83,8 +91,12 @@ internal sealed partial class RopeWindow : Window
         surface.PreviewMouseWheel+=(_,e)=> { scrollOffset=Math.Clamp(scrollOffset-e.Delta,0,Math.Max(0,cards.Children.Count*140-Width+20)); Canvas.SetLeft(cards,10-scrollOffset); e.Handled=true; };
         Content = surface; surface.Children.Add(cards); Canvas.SetTop(cards, 18);
         AllowDrop = true;
-        PreviewDragOver += (_, e) => { e.Effects = settings.DropToHang && e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None; e.Handled = true; };
-        Drop += (_, e) => { if (settings.DropToHang && e.Data.GetData(DataFormats.FileDrop) is string[] paths) Guard(() => Attach(paths)); e.Handled = true; };
+        // The rope is the drop target when it slides down to catch a drag. Making the surface and the
+        // card row drop-enabled too means a file released anywhere on the rope — over a card or in a
+        // gap — bubbles the DragDrop events up to the window handler and gets hung.
+        surface.        AllowDrop = true;
+        PreviewDragOver += (_, e) => { e.Effects = settings.DropToHang && !selfDragging && e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None; e.Handled = true; };
+        Drop += (_, e) => { if (settings.DropToHang && !selfDragging && e.Data.GetData(DataFormats.FileDrop) is string[] paths) Guard(() => Attach(paths)); e.Handled = true; };
         Loaded += (_, _) => Start();
         Closed += (_, _) => { closing = true; if (handle != IntPtr.Zero) Native.UnregisterHotKey(handle, VisibilityHotKeyId); scanTimer.Stop(); pointerTimer.Stop(); foreach (var watcher in watchers) watcher.Dispose(); foreach (var w in deskWindows.Values) w.Close(); tray?.Dispose(); ClearClipboard(false, false); Application.Current.Shutdown(); };
     }
@@ -253,12 +265,12 @@ internal sealed partial class RopeWindow : Window
         var missing = FileRecord.Read(file.Path) is null;
         var pinned = state.Pinned.Contains(file.Path);
         if (clipboardItems.TryGetValue(file.Path,out var note) && note is not null)
-            body.Children.Add(new TextBlock { Text=note.Plain, TextWrapping=TextWrapping.Wrap, Height=80, Margin=new Thickness(5), Background=new SolidColorBrush(Color.FromRgb(255,248,215)) });
+            body.Children.Add(new TextBlock { Text=note.Plain, TextWrapping=TextWrapping.Wrap, Height=80, Margin=new Thickness(5), Background=Theme.Brush(CurrentTheme.NotePaper) });
         else body.Children.Add(new Image { Source=Native.Thumbnail(file.Path), Width=106, Height=85, Stretch=Stretch.Uniform });
         body.Children.Add(new TextBlock { Text=note is not null ? T("文字便签","Text Note") : file.Name, TextTrimming=TextTrimming.CharacterEllipsis, FontSize=10, TextAlignment=TextAlignment.Center, Margin=new Thickness(3) });
         if (missing || pinned) body.Children.Add(new TextBlock { Text=missing ? T("文件失效","Unavailable") : T("已固定","Pinned"), FontSize=10, Foreground=missing ? Brushes.Firebrick : Brushes.SlateGray, TextAlignment=TextAlignment.Center });
-        var card = new Border { Child=body, Background=new SolidColorBrush(Color.FromArgb(245,248,249,250)), CornerRadius=new CornerRadius(12), Padding=new Thickness(7),
-            Effect=new DropShadowEffect { BlurRadius=12, ShadowDepth=4, Opacity=.2 } };
+        var card = new Border { Child=body, Background=Theme.Brush(CurrentTheme.CardSurface), BorderBrush=Theme.Brush(CurrentTheme.CardBorder), BorderThickness=new Thickness(1), CornerRadius=new CornerRadius(12), Padding=new Thickness(7),
+            Effect=new DropShadowEffect { BlurRadius=12, ShadowDepth=4, Opacity=.2 }, AllowDrop=true };
         var name = note is not null ? T("文字便签","Text Note") : file.Name;
         card.ToolTip = name + "\n" + (clipboardItems.ContainsKey(file.Path) ? T("剪贴板（本次会话）","Clipboard (this session)") : System.IO.Path.GetDirectoryName(file.Path)) +
             "\n" + (file.IsDirectory ? T("文件夹（不递归计算大小）","Folder (contents not counted)") : $"{file.Size:N0} bytes") + "\n" + T("创建：","Created: ") + file.Created.ToLocalTime() + "\n" + T("修改：","Modified: ") + file.Modified.ToLocalTime() + (missing ? "\n" + T("源文件不存在或无法访问","Original is missing or inaccessible") : "");
@@ -314,6 +326,7 @@ internal sealed partial class RopeWindow : Window
                 try
                 {
                     Validate(file); Native.ClickThrough(this,false);
+                    selfDragging=true;
                     var moving=settings.CtrlDragMoves && (Keyboard.Modifiers & ModifierKeys.Control)!=0;
                     var payload=FilePayload(file.Path);
                     // CF_HDROP alone only ever copies. This asks the drop target to move the file.
@@ -323,7 +336,7 @@ internal sealed partial class RopeWindow : Window
                     // accepted is then finished as a move, which may mean doing it here.
                     if (moving && outcome is DragDropEffects.Copy or DragDropEffects.Move) CompleteMove(file);
                 }
-                finally { busy=false; signature=""; Render(); }
+                finally { selfDragging=false; busy=false; signature=""; Render(); }
             });
         };
         card.ContextMenu = CardMenu(file);
@@ -384,7 +397,7 @@ internal sealed partial class RopeWindow : Window
             existing.Activate();
             return;
         }
-        var window = new PinWindow(file, path =>
+        var window = new PinWindow(file, CurrentTheme, path =>
         {
             if (deskWindows.TryGetValue(path, out var w)) { deskWindows.Remove(path); w.Close(); }
             state.DeskPins.Remove(path); Persist();
@@ -402,7 +415,7 @@ internal sealed partial class RopeWindow : Window
             var file = FileRecord.Read(path);
             if (file is null) { state.DeskPins.Remove(path); continue; }
             if (deskWindows.ContainsKey(path)) continue;
-            var window = new PinWindow(file, p =>
+            var window = new PinWindow(file, CurrentTheme, p =>
             {
                 if (deskWindows.TryGetValue(p, out var w)) { deskWindows.Remove(p); w.Close(); }
                 state.DeskPins.Remove(p); Persist();
@@ -414,19 +427,20 @@ internal sealed partial class RopeWindow : Window
     }
 
     private static bool IsImage(string path) => Array.Exists(ImageExtensions, e => path.EndsWith(e, StringComparison.OrdinalIgnoreCase));
-    private static Button CardButton(string glyph, string tooltip, Action click)
+    private Button CardButton(string glyph, string tooltip, Action click)
     {
+        var theme = CurrentTheme;
         var button = new Button
         {
             Content=glyph, FontSize=11, FontWeight=FontWeights.Bold, Width=18, Height=18,
             Padding=new Thickness(0), BorderThickness=new Thickness(0),
-            Background=new SolidColorBrush(Color.FromArgb(150,255,255,255)),
-            Foreground=new SolidColorBrush(Color.FromRgb(64,72,82)),
-            Cursor=Cursors.Hand, ToolTip=tooltip, Opacity=.5
+            Background=new SolidColorBrush((Color)ColorConverter.ConvertFromString(theme.CardSurface)) { Opacity = 0.92 },
+            Foreground=Theme.Brush(theme.CardText),
+            Cursor=Cursors.Hand, ToolTip=tooltip, Opacity=.6
         };
         button.Click += (_,_) => click();
-        button.MouseEnter += (_,_) => button.Opacity=1;
-        button.MouseLeave += (_,_) => button.Opacity=.5;
+        button.MouseEnter += (_,_) => { button.Opacity=1; button.Background=Theme.Brush(theme.Accent); button.Foreground=Brushes.White; };
+        button.MouseLeave += (_,_) => { button.Opacity=.6; button.Background=new SolidColorBrush((Color)ColorConverter.ConvertFromString(theme.CardSurface)) { Opacity = 0.92 }; button.Foreground=Theme.Brush(theme.CardText); };
         return button;
     }
     /// Waits out the system double-click window, so opening a file never also overwrites the clipboard.
@@ -495,9 +509,15 @@ internal sealed partial class RopeWindow : Window
         // sits (the fix for "can't summon at the top"); this is the reliable half of PicRope's logic.
         bool nearTop = cursor.X >= screen.Bounds.Left && cursor.X < screen.Bounds.Right
             && cursor.Y >= screen.Bounds.Top && cursor.Y <= screen.WorkingArea.Top + TriggerBand;
+        // A held button (a real drag from Explorer / the desktop) entering the top screen band makes the
+        // rope slide down to catch it — in SCREEN coordinates, so it triggers well before the cursor
+        // could reach the collapsed strip. This is the "drag a file to the top of the screen" gesture.
+        bool dragAtTop = down && settings.DropToHang
+            && cursor.X >= screen.Bounds.Left && cursor.X < screen.Bounds.Right
+            && cursor.Y >= screen.Bounds.Top && cursor.Y <= screen.Bounds.Top + DragBand;
         // Poll faster while the rope is in play, like PicRope, to keep the summon snappy without
         // burning CPU while it is tucked away.
-        var interval = revealed || nearTop ? 30 : 100;
+        var interval = revealed || nearTop || dragAtTop ? 30 : 100;
         if (pointerTimer.Interval.TotalMilliseconds != interval) pointerTimer.Interval = TimeSpan.FromMilliseconds(interval);
         var local = PointFromScreen(cursor);
         bool overCard = revealed && local.X >= 0 && local.X <= Width && local.Y >= 0 && local.Y <= Height
@@ -505,7 +525,7 @@ internal sealed partial class RopeWindow : Window
         // A held button in the rope's drop zone means a file is being dragged onto it. It is not gated
         // on the rope already being open, because a collapsed rope offers nothing to aim at — keeping
         // it open lets the drop land (a feature beyond PicRope, which only drags out).
-        bool dragging = down && settings.DropToHang && local.X >= 0 && local.X <= Width && local.Y >= 0 && local.Y <= RevealHeight;
+        bool dragging = down && settings.DropToHang && (dragAtTop || (local.X >= 0 && local.X <= Width && local.Y >= 0 && local.Y <= RevealHeight));
         var now = DateTime.UtcNow;
         bool show;
 
@@ -559,7 +579,17 @@ internal sealed partial class RopeWindow : Window
 
     private void SetReveal(bool shown, bool overCard, bool dragging)
     {
-        if (shown != revealed) { revealed = shown; Height = shown ? RevealHeight : CollapsedHeight; }
+        if (shown != revealed)
+        {
+            revealed = shown;
+            var target = shown ? RevealHeight : CollapsedHeight;
+            // A short slide so the rope visibly "comes down to catch" a drag; the logical state flips at
+            // once so the drop target and click-through are already correct for the whole animation.
+            if (PresentationSource.FromVisual(this) is not null)
+                BeginAnimation(HeightProperty, new DoubleAnimation(target, TimeSpan.FromMilliseconds(shown ? 150 : 110))
+                { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } });
+            else Height = target;
+        }
         // Capture only while revealed over a card or while a drag is in flight, so empty rope areas
         // stay click-through and a window title underneath can still be grabbed; the drop target is
         // live exactly when a file is being dragged over.

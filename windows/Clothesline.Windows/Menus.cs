@@ -137,8 +137,9 @@ internal sealed partial class RopeWindow
     private void BuildTray(Forms.ContextMenuStrip menu)
     {
         menu.Items.Clear(); menu.Items.Add(new Forms.ToolStripMenuItem("Clothesline · Windows") { Enabled=false });
-        // The watched folders used to be listed here as a dead label, which left no way to remove
-        // one once it had been added. They now lead to the settings window, where removal lives.
+        // Everything that is a setting — clip-board hanging, the text envelope, appearance, OCR engine
+        // and model, items-to-keep, launch-at-login, language — now lives in the Settings window.
+        // The tray keeps only the quick actions that are awkward to reach from there.
         var folders=new Forms.ToolStripMenuItem(T("监控文件夹","Watched Folders")+T("（"," (")+settings.Folders.Count+T("）"," )"));
         folders.DropDownItems.Add(TrayItem(T("管理监控文件夹…","Manage Watched Folders…"),()=>ShowSettings(SettingsPage.Folders)));
         foreach (var folder in settings.Folders)
@@ -147,52 +148,18 @@ internal sealed partial class RopeWindow
         if (!string.IsNullOrEmpty(failure)) menu.Items.Add(new Forms.ToolStripMenuItem("⚠ "+failure) { Enabled=false });
         if (!string.IsNullOrEmpty(hotKeyNotice)) menu.Items.Add(new Forms.ToolStripMenuItem("⚠ "+hotKeyNotice) { Enabled=false });
         menu.Items.Add(new Forms.ToolStripSeparator());
-        menu.Items.Add(TrayItem(T("一直显示晾衣绳","Always Show Clothesline")+T("（Ctrl+Alt+↑）"," (Ctrl+Alt+Up)"),()=> { settings.AlwaysVisible=!settings.AlwaysVisible; Persist(); },settings.AlwaysVisible));
-        menu.Items.Add(TrayItem(T("自动隐藏晾衣绳","Auto-hide Clothesline"),()=> { settings.AlwaysVisible=false; Persist(); },!settings.AlwaysVisible));
         menu.Items.Add(TrayItem(T("设置…","Settings…"),()=>ShowSettings(SettingsPage.General)));
-        menu.Items.Add(TrayItem(T("挂上文件…","Hang Files…"),()=> { var picker=new OpenFileDialog { Multiselect=true }; if (picker.ShowDialog(this)==true) Attach(picker.FileNames); }));
-        menu.Items.Add(TrayItem(T("挂上文件夹…","Hang Folder…"),()=> { var picker=new OpenFolderDialog(); if (picker.ShowDialog(this)==true) Attach([picker.FolderName]); }));
-        menu.Items.Add(TrayItem(T("添加监控文件夹…","Add Watched Folder…"),()=> {
-            var picker=new OpenFolderDialog(); if (picker.ShowDialog(this)!=true) return;
-            if (!settings.Folders.Contains(picker.FolderName,StringComparer.OrdinalIgnoreCase)) settings.Folders.Add(picker.FolderName);
-            Persist(); RebuildWatchers();
-        }));
-        menu.Items.Add(TrayItem(T("打开下载文件夹","Open Downloads"),()=>Native.Open(Native.Downloads())));
+        var hang=new Forms.ToolStripMenuItem(T("挂上…","Hang…"));
+        hang.DropDownItems.Add(TrayItem(T("挂上文件…","Hang Files…"),()=> { var picker=new OpenFileDialog { Multiselect=true }; if (picker.ShowDialog(this)==true) Attach(picker.FileNames); }));
+        hang.DropDownItems.Add(TrayItem(T("挂上文件夹…","Hang Folder…"),()=> { var picker=new OpenFolderDialog(); if (picker.ShowDialog(this)==true) Attach([picker.FolderName]); }));
+        menu.Items.Add(hang);
         menu.Items.Add(TrayItem(T("最近文件…","Recent Files…"),ShowRecent));
-        var clipboard=new Forms.ToolStripMenuItem(T("剪贴板挂载","Clipboard"));
-        clipboard.DropDownItems.Add(TrayItem(T("自动挂上图片 / 截图","Automatically Hang Images / Screenshots"),()=> { settings.ClipboardImages=!settings.ClipboardImages; clipboardSequence=Native.GetClipboardSequenceNumber(); Persist(); },settings.ClipboardImages));
-        clipboard.DropDownItems.Add(TrayItem(T("自动挂上文字便签","Automatically Hang Text Notes"),()=> { settings.ClipboardText=!settings.ClipboardText; clipboardSequence=Native.GetClipboardSequenceNumber(); Persist(); },settings.ClipboardText));
-        clipboard.DropDownItems.Add(TrayItem(T("清空剪贴板挂载内容","Clear Clipboard Items"),()=>ClearClipboard())); menu.Items.Add(clipboard);
-        menu.Items.Add(TrayItem(T("文字信封…","Text Envelope…"),ShowTextEnvelope));
-        menu.Items.Add(TrayItem(T("外观…","Appearance…"),ShowAppearance));
-        var capacity=new Forms.ToolStripMenuItem(T("保留数量","Items to Keep"));
-        foreach (var number in new[] { 5,8,12,25,50 }) capacity.DropDownItems.Add(TrayItem(number.ToString(),()=> { settings.Capacity=number; Persist(); },settings.Capacity==number));
-        menu.Items.Add(capacity);
-        // Listed at runtime rather than hard coded: which languages exist depends entirely on what
-        // the user has installed, and a machine with none installed must say so instead of guessing.
-        var ocr=new Forms.ToolStripMenuItem(T("提取文字（OCR）","Extract Text (OCR)"));
-        var ocrLanguages=OcrLanguages();
-        if (ocrLanguages.Count==0)
-            ocr.DropDownItems.Add(new Forms.ToolStripMenuItem(T("未安装 OCR 语言包","No OCR language pack installed")) { Enabled=false });
-        else
-        {
-            ocr.DropDownItems.Add(TrayItem(T("自动选择","Auto"),()=> { settings.OcrLanguage=""; Persist(); },string.IsNullOrEmpty(settings.OcrLanguage)));
-            foreach (var language in ocrLanguages)
-                ocr.DropDownItems.Add(TrayItem(language.Label,()=> { settings.OcrLanguage=language.Tag; Persist(); },string.Equals(settings.OcrLanguage,language.Tag,StringComparison.OrdinalIgnoreCase)));
-        }
-        menu.Items.Add(ocr);
-        ocr.DropDownItems.Add(new Forms.ToolStripSeparator());
-        ocr.DropDownItems.Add(new Forms.ToolStripMenuItem(T("当前引擎：","Current engine: ") + (settings.OcrEngine=="v6" ? PaddleOcr.DisplayName(settings.OcrModel) : T("Windows 自带","Windows built-in"))) { Enabled=false });
-        menu.Items.Add(TrayItem(T("文字识别引擎与模型…","Recognition Engine & Models…"),()=>ShowSettings(SettingsPage.Ocr)));
+        menu.Items.Add(new Forms.ToolStripSeparator());
         menu.Items.Add(TrayItem(T("清空晾衣绳（不删除文件）","Clear Clothesline (Keep Files)"),()=> { foreach (var file in Records()) state.Dismiss(file); Persist(); }));
         menu.Items.Add(TrayItem(T("重新显示已取下的文件","Show Removed Items Again"),()=> { state.Dismissed.Clear(); Persist(); }));
         menu.Items.Add(new Forms.ToolStripSeparator());
-        menu.Items.Add(TrayItem(T("开机启动","Launch at Login"),()=>Native.LaunchAtLogin=!Native.LaunchAtLogin,Native.LaunchAtLogin));
         var updates=TrayItem(checking ? T("正在检查更新…","Checking for Updates…") : T("检查更新…","Check for Updates…"),()=>_ = CheckUpdates()); updates.Enabled=!checking; menu.Items.Add(updates);
         menu.Items.Add(TrayItem(T("关于 Clothesline…","About Clothesline…"),ShowAbout));
-        var languages=new Forms.ToolStripMenuItem("语言 / Language");
-        languages.DropDownItems.Add(TrayItem("简体中文",()=> { settings.English=false; Persist(); },!settings.English));
-        languages.DropDownItems.Add(TrayItem("English",()=> { settings.English=true; Persist(); },settings.English)); menu.Items.Add(languages);
         menu.Items.Add(new Forms.ToolStripSeparator()); menu.Items.Add(TrayItem(T("退出 Clothesline","Quit Clothesline"),Close));
     }
     private void ShowAppearance()
@@ -227,7 +194,7 @@ internal sealed partial class RopeWindow
     private void ShowAbout()
     {
         var license=System.IO.Path.Combine(AppContext.BaseDirectory,"LICENSE.txt");
-        var text="Clothesline Windows 0.1.0-rc.1\n\n"+T("把常用文件挂在屏幕顶部，随手预览、拖拽和使用。","Keep files at the top of your screen for quick access and drag and drop.")+"\n\nhttps://github.com/zhongguozhang/Clothesline\n\n"+(File.Exists(license) ? File.ReadAllText(license) : "MIT License — see repository LICENSE");
+        var text="Clothesline Windows 0.1.0-rc.8\n\n"+T("把常用文件挂在屏幕顶部，随手预览、拖拽和使用。","Keep files at the top of your screen for quick access and drag and drop.")+"\n\nhttps://github.com/zhongguozhang/Clothesline\n\n"+(File.Exists(license) ? File.ReadAllText(license) : "MIT License — see repository LICENSE");
         var window=new Window { Title=T("关于 Clothesline","About Clothesline"),Width=580,Height=500,Owner=this,WindowStartupLocation=WindowStartupLocation.CenterScreen };
         window.Content=new TextBox { Text=text,IsReadOnly=true,TextWrapping=TextWrapping.Wrap,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,Margin=new Thickness(16) }; window.Show();
     }
@@ -239,7 +206,7 @@ internal sealed partial class RopeWindow
             using var client=new HttpClient { Timeout=TimeSpan.FromSeconds(20) }; client.DefaultRequestHeaders.UserAgent.ParseAdd("Clothesline-Windows/0.1.0");
             using var json=JsonDocument.Parse(await client.GetStringAsync("https://api.github.com/repos/zhongguozhang/Clothesline/releases?per_page=100"));
             // Separate platform tag prevents either app from offering the other platform's installer.
-            var current=ReleaseVersion.Parse("windows-v0.1.0-rc.1")!;
+            var current=ReleaseVersion.Parse("windows-v0.1.0-rc.8")!;
             var newer=json.RootElement.EnumerateArray().Where(r=>!r.GetProperty("draft").GetBoolean())
                 .Select(r=>(Version:ReleaseVersion.Parse(r.GetProperty("tag_name").GetString()),Url:r.GetProperty("html_url").GetString()!))
                 .Where(r=>r.Version is not null && r.Version.CompareTo(current)>0 && r.Url.StartsWith("https://github.com/zhongguozhang/Clothesline/releases/tag/windows-v",StringComparison.Ordinal))
