@@ -4,6 +4,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -75,6 +76,37 @@ internal static class Native
     [DllImport("user32.dll", SetLastError = true)] public static extern bool RegisterHotKey(IntPtr window, int id, uint modifiers, uint key);
     [DllImport("user32.dll", SetLastError = true)] public static extern bool UnregisterHotKey(IntPtr window, int id);
 
+    /// Turns a "Ctrl+Alt+Up" style string into the Win32 modifiers + virtual key that
+    /// RegisterHotKey expects. The non-modifier part is parsed as a WPF Key name and converted with
+    /// KeyInterop, so it round-trips the value the settings capture control produces. Returns false
+    /// for an empty string or anything that is not exactly one real key plus zero or more modifiers.
+    public static bool TryParseHotKey(string? value, out uint modifiers, out uint virtualKey)
+    {
+        modifiers = 0; virtualKey = 0;
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        Key? mainKey = null;
+        foreach (var raw in value.Split('+'))
+        {
+            var part = raw.Trim();
+            switch (part.ToLowerInvariant())
+            {
+                case "ctrl": case "control": modifiers |= ModifierControl; break;
+                case "alt": modifiers |= ModifierAlt; break;
+                case "shift": modifiers |= ModifierShift; break;
+                case "win": case "windows": case "super": modifiers |= ModifierWindows; break;
+                default:
+                    if (!Enum.TryParse<Key>(part, true, out var key)) return false;
+                    if (key is Key.LeftCtrl or Key.RightCtrl or Key.LeftAlt or Key.RightAlt
+                        or Key.LeftShift or Key.RightShift or Key.LWin or Key.RWin) return false;
+                    mainKey = key;
+                    break;
+            }
+        }
+        if (mainKey is null) return false;
+        virtualKey = (uint)KeyInterop.VirtualKeyFromKey(mainKey.Value);
+        return true;
+    }
+
     // ---- Full-screen detection -----------------------------------------------
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr window, out WindowRectangle rectangle);
@@ -111,8 +143,14 @@ internal static class Native
     public static bool Edit(string path)
     {
         if (TryVerb(path, "edit")) return true;
-        var paint = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "mspaint.exe");
-        return File.Exists(paint) && TryRun(paint, "\"" + path + "\"");
+        // mspaint lives in the real System32. SpecialFolder.System can resolve to SysWOW64 under a
+        // redirected (32-bit) process, where mspaint does not exist, so resolve via SystemRoot first.
+        var windows = Environment.GetEnvironmentVariable("SystemRoot") ?? Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+        var paint = Path.Combine(windows, "System32", "mspaint.exe");
+        if (!File.Exists(paint)) paint = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "mspaint.exe");
+        if (File.Exists(paint) && TryRun(paint, "\"" + path + "\"")) return true;
+        // Last resort: open with the default association so something always happens.
+        return TryVerb(path, "open");
     }
     private static bool TryVerb(string path, string verb)
     { try { Process.Start(new ProcessStartInfo(path) { UseShellExecute = true, Verb = verb }); return true; } catch { return false; } }

@@ -58,6 +58,8 @@ internal sealed partial class RopeWindow : Window
     private double scrollOffset;
     private uint clipboardSequence;
     private DateTime lastInside = DateTime.MinValue;
+    private DateTime? enteredTopAt;
+    private Window? settingsWindow;
     private string? clipboardFolder;
     private DispatcherTimer? clickTimer;
     private IntPtr handle;
@@ -110,8 +112,10 @@ internal sealed partial class RopeWindow : Window
         Native.UnregisterHotKey(handle, VisibilityHotKeyId);
         hotKeyNotice = "";
         if (!settings.HotKeyEnabled) return;
-        if (!Native.RegisterHotKey(handle, VisibilityHotKeyId, Native.ModifierControl | Native.ModifierAlt, Native.VirtualKeyUp))
-            hotKeyNotice = T("无法注册 Ctrl+Alt+↑ 快捷键，可能已被其他程序占用。", "Could not register Ctrl+Alt+Up; another application may already use it.");
+        if (!Native.TryParseHotKey(settings.HotKey, out var modifiers, out var key))
+        { hotKeyNotice = T("快捷键设置无效或为空，请在设置里重新设置。", "The hot key setting is invalid or empty; set it again in Settings."); return; }
+        if (!Native.RegisterHotKey(handle, VisibilityHotKeyId, modifiers, key))
+            hotKeyNotice = T("无法注册快捷键，可能已被其他程序占用。", "Could not register the hot key; another application may already use it.");
     }
     private IntPtr WndProc(IntPtr window, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
@@ -432,7 +436,19 @@ internal sealed partial class RopeWindow : Window
         // This cannot be gated on the rope already being open, because a collapsed rope offers
         // nothing to aim at and a drop target that only exists once open can never be reached.
         var dragging = Native.MousePressed && local.X>=0 && local.X<=Width && local.Y>=0 && local.Y<=RevealHeight;
-        if (nearTop || overCard || dragging) lastInside=DateTime.UtcNow;
+        // A hover near the top edge summons the rope, but only after the pointer has lingered there
+        // for RevealDwell milliseconds. A hover over a card or an in-flight drag reveals at once,
+        // because those are already direct interactions rather than a passive summon. When RevealDwell
+        // is 0 the top-edge summon is immediate, matching the original behaviour.
+        var inTrigger = nearTop || overCard || dragging;
+        if (inTrigger)
+        {
+            if (enteredTopAt is null) enteredTopAt = DateTime.UtcNow;
+            var stayed = (DateTime.UtcNow - enteredTopAt.Value).TotalMilliseconds;
+            var dwellOk = overCard || dragging || settings.RevealDwell <= 0 || stayed >= settings.RevealDwell;
+            if (dwellOk) lastInside = DateTime.UtcNow;
+        }
+        else enteredTopAt = null;
         // Stay out of the way of full-screen video and games, and give the pointer a moment of grace.
         // A drag overrides the full-screen rule: a maximised Explorer covers the whole monitor, so
         // without that override the rope would stay collapsed and the file could never be dropped.

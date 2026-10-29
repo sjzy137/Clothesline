@@ -28,7 +28,7 @@ This candidate uses the primary work area only. It does not include macOS Quick 
 | **Ctrl + drag** | Moves the original: it is sent to the Recycle Bin once the drop succeeded, and the card leaves the line |
 | ● / ○ top-left | Pin / unpin |
 | × top-right | Take down: hides the card, never touches the file |
-| Right click a card | Open, copy, copy image, copy text, **extract text (OCR)**, edit in Paint, save as, show in Explorer, rename, pin, take down (keep original), **take down (delete original)** |
+| Right click a card | Open, copy, copy image, copy text, **extract text (OCR)**, edit (system default editor), save as, show in Explorer, rename, pin, take down (keep original), **take down (delete original)** |
 | Full-screen video or game | The clothesline hides itself; it still slides out while a file is being dragged |
 
 Ctrl+drag writes `CFSTR_PREFERREDDROPEFFECT` to request a move, but **Explorer does not move a CF_HDROP that came from another application**. Clothesline therefore finishes the move itself once the drop succeeded: if the target really moved the file it is already gone and the card is simply dropped, otherwise the original goes to the Recycle Bin first. The bin rather than a hard delete is deliberate — the app cannot see where the target put its copy, so it cannot confirm the copy landed, and the bin keeps that one failure recoverable.

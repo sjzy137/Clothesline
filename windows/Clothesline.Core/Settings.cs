@@ -42,6 +42,13 @@ public sealed class Settings
     public bool DropToHang { get; set; } = true;
     /// How long the rope stays out after the pointer leaves, in milliseconds.
     public int RevealDelay { get; set; } = 1800;
+    /// How long the pointer must stay in the top-edge trigger zone before the rope slides out, in
+    /// milliseconds. 0 reveals immediately on hover (the original behaviour). Range 0–10000 ms.
+    public int RevealDwell { get; set; } = 0;
+    /// The global hot key that toggles the rope, written as "Ctrl+Alt+Up". Empty disables it
+    /// regardless of HotKeyEnabled. The WPF key name is preserved so it round-trips through
+    /// Native.TryParseHotKey; only registered when HotKeyEnabled is also true.
+    public string? HotKey { get; set; } = "Ctrl+Alt+Up";
     public static Settings Load(string path)
     {
         if (!File.Exists(path)) return new();
@@ -52,6 +59,7 @@ public sealed class Settings
             if (value.Folders is null || value.Attached is null || value.Recent is null || value.Pins is null || value.PinSnapshots is null || value.Dismissed is null) throw new JsonException();
             value.Dismissed = new(value.Dismissed, StringComparer.OrdinalIgnoreCase);
             value.Capacity = Math.Clamp(value.Capacity, 3, 50);
+            value.RevealDwell = Math.Clamp(value.RevealDwell, 0, 10000);
             // A file written before PP-OCRv6 existed carries no engine choice, and the fresh default
             // cannot tell it apart from someone having deliberately picked the Windows engine. Those
             // files are upgraded to the more accurate engine; an explicit choice is left alone.

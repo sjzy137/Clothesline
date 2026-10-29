@@ -99,6 +99,15 @@ internal static class WindowsSelfTest
             if (!Native.Recycle(recycleTarget)) throw new Exception("the Recycle Bin refused a temporary file");
             if (File.Exists(recycleTarget)) throw new Exception("the original was still in place after recycling");
 
+            // The hot key is now user configurable, so the string it round-trips through must parse
+            // back to exactly the Win32 modifiers and virtual key that RegisterHotKey expects. A broken
+            // parser would silently bind the wrong key or bind nothing and the rope would stop toggling.
+            if (!Native.TryParseHotKey("Ctrl+Alt+Up", out var hkMods, out var hkKey)) throw new Exception("default hot key failed to parse");
+            if (hkMods != (Native.ModifierControl | Native.ModifierAlt)) throw new Exception("hot key modifiers parsed wrong");
+            if (hkKey != Native.VirtualKeyUp) throw new Exception("hot key virtual key parsed wrong");
+            if (Native.TryParseHotKey("", out _, out _) || Native.TryParseHotKey("Ctrl+Alt", out _, out _)) throw new Exception("invalid hot key strings were accepted");
+            var hkCheck = "hot key string parses";
+
             // PP-OCRv6 is the other new dependency, and the only way to know it actually reads
             // anything is to unpack the bundled model and hand it glyphs drawn on this machine.
             var v6Sample=Path.Combine(root,"v6-sample.png");
@@ -113,7 +122,7 @@ internal static class WindowsSelfTest
             var license=Path.Combine(AppContext.BaseDirectory,"LICENSE.txt");
             if (!File.ReadAllText(license).Contains("Alejandro")) throw new Exception("upstream MIT notice missing");
             if (!File.Exists(Native.Downloads()) && !Directory.Exists(Native.Downloads())) { /* Known folder may be uncreated on a fresh runner. */ }
-            File.WriteAllText(report,JsonSerializer.Serialize(new { passed=true, checks=new[] { "real file card", "safe dismissal", "file-drop payload", "WPF overlay construction", "card pin and take-down buttons", "ctrl-drag move marker", ocrCheck, "recycle bin move", v6Check, "image source lock released", "bundled MIT license" }, uiAcceptance=false }));
+            File.WriteAllText(report,JsonSerializer.Serialize(new { passed=true, checks=new[] { "real file card", "safe dismissal", "file-drop payload", "WPF overlay construction", "card pin and take-down buttons", "ctrl-drag move marker", ocrCheck, "recycle bin move", hkCheck, v6Check, "image source lock released", "bundled MIT license" }, uiAcceptance=false }));
             app.Shutdown(); return 0;
         }
         catch (Exception error)

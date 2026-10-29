@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using Clothesline.Core;
 using Microsoft.Win32;
@@ -20,6 +21,14 @@ internal sealed partial class RopeWindow
     /// list, or a download lives here instead.
     private void ShowSettings(SettingsPage start)
     {
+        // Only one settings window at a time: reopening from the tray (or after minimising) focuses
+        // the existing one instead of stacking another copy on top of it.
+        if (settingsWindow is { } existing)
+        {
+            if (existing.WindowState == WindowState.Minimized) existing.WindowState = WindowState.Normal;
+            existing.Activate();
+            return;
+        }
         var current = start;
         var window = new Window
         {
@@ -73,7 +82,8 @@ internal sealed partial class RopeWindow
 
         Show(start);
         var wasBusy = busy; busy = true;
-        window.Closed += (_, _) => { busy = wasBusy; reopenSettings = null; };
+        settingsWindow = window;
+        window.Closed += (_, _) => { settingsWindow = null; busy = wasBusy; reopenSettings = null; };
         // Reached by the page builders through a field, so a language change can reopen at the same
         // page without threading a callback through every control.
         reopenSettings = Reload;
@@ -93,7 +103,7 @@ internal sealed partial class RopeWindow
 
     private UIElement BuildPage(SettingsPage page, Window window, Action refresh) => page switch
     {
-        SettingsPage.Features => BuildFeatures(refresh),
+        SettingsPage.Features => BuildFeatures(window, refresh),
         SettingsPage.Folders => BuildFolders(window, refresh),
         SettingsPage.Clipboard => BuildClipboard(refresh),
         SettingsPage.Ocr => BuildOcr(refresh),
@@ -102,7 +112,7 @@ internal sealed partial class RopeWindow
 
     // ---- Page: feature switches ----------------------------------------------
 
-    private UIElement BuildFeatures(Action refresh)
+    private UIElement BuildFeatures(Window window, Action refresh)
     {
         var panel = Page();
         panel.Children.Add(Heading(T("功能开关","Feature switches")));
@@ -134,10 +144,44 @@ internal sealed partial class RopeWindow
               "Retracts the rope during full-screen video, games, or a maximised window. It still slides out while a file is being dragged, otherwise the drop could never land."),
             settings.HideFullScreen, value => { settings.HideFullScreen = value; Persist(); }));
 
-        panel.Children.Add(Toggle(T("Ctrl+Alt+↑ 显示 / 隐藏","Ctrl+Alt+Up shows or hides the rope"),
-            T("关掉可以把这个组合键让给其他程序，例如英特尔显卡自带的快捷键。",
-              "Turning this off releases the combination to other software, such as the shortcuts built into Intel graphics drivers."),
+        panel.Children.Add(Toggle(T("显示 / 隐藏快捷键","Show / hide hot key"),
+            T("关掉可以把这个组合键让给其他程序，例如英特尔显卡自带的快捷键。组合键本身可在下方自定义。",
+              "Turning this off releases the combination to other software, such as the shortcuts built into Intel graphics drivers. The combination itself can be customised below."),
             settings.HotKeyEnabled, value => { settings.HotKeyEnabled = value; Persist(); ApplyHotKey(); }));
+
+        // Custom hot key capture: click the button, then press a combination. It is recorded from the
+        // real key event, so no manual text entry is needed and the value round-trips through
+        // Native.TryParseHotKey. At least one modifier is required so a bare key can never hijack
+        // normal typing system-wide.
+        var hotkeyStatus = new TextBlock { FontSize = 12, Foreground = Brushes.DimGray, Margin = new Thickness(0, 3, 0, 0) };
+        var hotkeyButton = new Button { Content = T("点击后按下组合键…","Click then press a combination…"), Padding = new Thickness(12, 5, 12, 5), HorizontalAlignment = HorizontalAlignment.Left };
+        var capturing = false;
+        void RefreshHotkeyStatus() => hotkeyStatus.Text = T("当前组合键：","Current shortcut: ") + (string.IsNullOrWhiteSpace(settings.HotKey) ? T("（未设置）","(none)") : settings.HotKey);
+        RefreshHotkeyStatus();
+        hotkeyButton.Click += (_, _) => { capturing = true; hotkeyButton.Content = T("请按下组合键（含 Ctrl/Alt/Shift/Win），Esc 取消…","Press a combination (with Ctrl/Alt/Shift/Win), Esc to cancel…"); hotkeyButton.Focus(); };
+        window.PreviewKeyDown += (_, e) =>
+        {
+            if (!capturing) return;
+            capturing = false;
+            hotkeyButton.Content = T("点击后按下组合键…","Click then press a combination…");
+            e.Handled = true;
+            if (e.Key == Key.Escape) return;
+            if (e.Key is Key.LeftCtrl or Key.RightCtrl or Key.LeftAlt or Key.RightAlt or Key.LeftShift or Key.RightShift or Key.LWin or Key.RWin) return;
+            var mods = e.KeyboardDevice.Modifiers;
+            if (mods == ModifierKeys.None) { hotkeyStatus.Text = T("至少需要一个修饰键（Ctrl/Alt/Shift/Win）。","At least one modifier key (Ctrl/Alt/Shift/Win) is required."); return; }
+            var parts = new List<string>();
+            if ((mods & ModifierKeys.Control) != 0) parts.Add("Ctrl");
+            if ((mods & ModifierKeys.Alt) != 0) parts.Add("Alt");
+            if ((mods & ModifierKeys.Shift) != 0) parts.Add("Shift");
+            if ((mods & ModifierKeys.Windows) != 0) parts.Add("Win");
+            parts.Add(e.Key.ToString());
+            settings.HotKey = string.Join("+", parts); Persist(); ApplyHotKey(); RefreshHotkeyStatus();
+        };
+        var hotkeyReset = new Button { Content = T("恢复默认","Reset"), Padding = new Thickness(12, 5, 12, 5), Margin = new Thickness(8, 0, 0, 0) };
+        hotkeyReset.Click += (_, _) => { settings.HotKey = "Ctrl+Alt+Up"; Persist(); ApplyHotKey(); RefreshHotkeyStatus(); };
+        var hotkeyRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4) };
+        hotkeyRow.Children.Add(hotkeyButton); hotkeyRow.Children.Add(hotkeyReset);
+        panel.Children.Add(Field(T("自定义快捷键","Custom shortcut"), hotkeyRow, hotkeyStatus));
 
         var delay = new ComboBox { Width = 180, HorizontalAlignment = HorizontalAlignment.Left };
         var options = new[] { 800, 1800, 3000, 5000 };
@@ -151,6 +195,20 @@ internal sealed partial class RopeWindow
         delay.SelectionChanged += (_, _) => { settings.RevealDelay = options[delay.SelectedIndex]; Persist(); };
         panel.Children.Add(Field(T("自动收回延时","Delay before retracting"), delay,
             Hint(T("指针离开晾衣绳后等多久再收起。","How long the rope waits after the pointer leaves before sliding back up."))));
+
+        // Summon dwell time: how long the pointer must linger at the top edge before the rope slides
+        // out. 0 reveals immediately on hover (the original behaviour); the slider goes up to 10 s.
+        var dwell = new Slider { Width = 240, HorizontalAlignment = HorizontalAlignment.Left, Minimum = 0, Maximum = 10000, TickFrequency = 500, SmallChange = 100, LargeChange = 1000 };
+        dwell.Value = settings.RevealDwell;
+        var dwellLabel = new TextBlock { FontSize = 12, Foreground = Brushes.DimGray, Margin = new Thickness(0, 3, 0, 0) };
+        void RefreshDwell() => dwellLabel.Text = settings.RevealDwell <= 0
+            ? T("0 秒（指针靠近立即滑出，保持原行为）","0 s (slides out on hover immediately, original behaviour)")
+            : (settings.RevealDwell / 1000.0).ToString("0.0") + T(" 秒"," s");
+        RefreshDwell();
+        dwell.ValueChanged += (_, _) => { settings.RevealDwell = (int)Math.Round(dwell.Value); Persist(); RefreshDwell(); };
+        panel.Children.Add(Field(T("召唤停留时长","Summon dwell time"), dwell,
+            Hint(T("指针在屏幕最顶部停留多久，晾衣绳才滑出。0 表示贴顶即显；最大 10 秒，适合误触频繁时降低灵敏度。",
+              "How long the pointer must linger at the very top of the screen before the rope slides out. 0 reveals on hover; up to 10 s, useful when the edge is brushed by accident often."))));
         return panel;
     }
 

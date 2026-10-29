@@ -35,7 +35,7 @@ internal sealed partial class RopeWindow
             menu.Items.Add(Item(T("复制文字","Copy Text"),()=>CopyText(file)));
         if (IsImage(file.Path))
             menu.Items.Add(AsyncItem(T("提取文字（OCR）","Extract Text (OCR)"),()=>ExtractText(file)));
-        menu.Items.Add(Item(T("用画图编辑","Edit in Paint"),()=> {
+        menu.Items.Add(Item(T("编辑…","Edit…"),()=> {
             Validate(file);
             if (!Native.Edit(file.Path)) throw new IOException(T("找不到可用的编辑程序。","No editor could be started."));
         }));
